@@ -1,0 +1,31 @@
+[build]
+  publish = "dist"
+  command = "npm run build"
+
+[functions]
+  directory = "netlify/functions"
+
+# Redirects so the React app can call /api/* while Netlify serves functions.
+[[redirects]]
+  from = "/api/dune/results"
+  to = "/.netlify/functions/dune"
+  status = 200
+
+[[redirects]]
+  from = "/api/price/auki"
+  to = "/.netlify/functions/price"
+  status = 200
+
+[[redirects]]
+  from = "/api/mexc/ticker"
+  to = "/.netlify/functions/mexc"
+  status = 200
+
+# Shared-password protection (Basic Auth) for everything, including /api/*
+# Set env vars in Netlify:
+#   AUKI_TREASURY_USER
+#   AUKI_TREASURY_PASS
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Basic-Auth = "AUKI_TREASURY_USER:AUKI_TREASURY_PASS"

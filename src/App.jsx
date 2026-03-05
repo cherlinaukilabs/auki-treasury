@@ -601,8 +601,8 @@ function MarketActivityTab({ daily, recentTrades, mexc }) {
       )}
 
       <div style={{ background:"#0F0F0F", border:"1px solid #1E1E1E", borderRadius:8, overflow:"hidden", marginBottom:16 }}>
-        <div style={{ display:"grid", gridTemplateColumns:"120px 110px 110px 120px 120px 80px", gap:12, padding:"14px 20px", borderBottom:"1px solid #1A1A1A" }}>
-          {["DATE","LOW","HIGH","BUY VOL","SELL VOL","TRADES"].map(h=>(
+        <div style={{ display:"grid", gridTemplateColumns:"120px 110px 110px 120px 120px 80px 120px", gap:12, padding:"14px 20px", borderBottom:"1px solid #1A1A1A" }}>
+          {["DATE","LOW","HIGH","BUY VOL","SELL VOL","TRADES","VOLUME (USD)"].map(h=>(
             <div key={h} style={{ fontSize:11, color:"#9a9a9a", letterSpacing:"0.1em", ...M }}>{h}</div>
           ))}
         </div>
@@ -618,6 +618,7 @@ function MarketActivityTab({ daily, recentTrades, mexc }) {
             <div style={{ color:"#7CC4A4" }}>{fmtTokens(d.buy_volume)}</div>
             <div style={{ color:"#E07B5A" }}>{fmtTokens(d.sell_volume)}</div>
             <div style={{ color:"#444" }}>{d.trade_count}</div>
+            <div style={{ color:"#C8A96E" }}>{fmtUsd(d.volume_usd)}</div>
           </div>
         ))}
       </div>

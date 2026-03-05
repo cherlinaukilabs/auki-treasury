@@ -779,6 +779,12 @@ export default function AukiTreasury() {
     return Number.isFinite(q) ? q : 0;
   }, [mexcTicker]);
 
+const priceChange24h = useMemo(() => {
+  if (!mexcTicker?.priceChangePercent) return null;
+  const p = parseFloat(mexcTicker.priceChangePercent);
+  return Number.isFinite(p) ? p : null;
+}, [mexcTicker]);
+
   const supplyPieData = useMemo(() => {
     const vaultSegments = VAULT_GROUPS.map(g => {
       const tot = g.vaults.reduce((s,n)=>s+Number(balances[n]||0),0);
@@ -857,6 +863,23 @@ export default function AukiTreasury() {
             sub={mexcError ? `MEXC: ${mexcError}` : (mexcTicker ? "MEXC AUKI/USDT · quote vol" : "MEXC unavailable")}
             accent="#C8A96E"
             loading={false}
+          />	  
+          <StatCard
+           label="24H PRICE CHANGE"
+           value={
+           priceChange24h === null
+           ? "—"
+           : `${priceChange24h.toFixed(2)}%`
+           }
+           sub="MEXC AUKI/USDT"
+           accent={
+             priceChange24h === null
+               ? "#F0ECE3"
+               : priceChange24h >= 0
+               ? "#7CC4A4"
+               : "#E07B5A"
+           }
+
           />
         </div>
 

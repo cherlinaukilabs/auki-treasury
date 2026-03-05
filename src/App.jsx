@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-const DUNE_API_KEY    = "V3EIDyaxRvgAbSse9AtoPFdEin6hnuYw";
+const DUNE_API_KEY    = "V3EIDyaxRvgAbSse9AtoPFdEin6hnuYw"; // (works, but ideally keep this server-side later)
 const QUERY_BALANCES  = 6752291;
 const QUERY_MOVEMENTS = 6752302;
 const QUERY_TRADES    = 6752309;
 const QUERY_DAILY     = 6763898;
+
 const TOTAL_SUPPLY    = 10_000_000_000;
 
 // ─── Address → Vault name ─────────────────────────────────────────────────────
@@ -52,19 +53,44 @@ const VAULT_GROUPS = [
   { id:"ecosystem",      label:"Ecosystem",            color:"#7CC4A4", vaults:["Ecosystem Rewards Unvested","Ecosystem Rewards Vested"] },
   { id:"investors",      label:"Investors & Backers",  color:"#C47AB5", vaults:["Backer wallet unvested","Backer wallet vested","OTC"] },
   { id:"infrastructure", label:"Token Infrastructure", color:"#E07B5A", vaults:["Manual Burner","Web3 Bootstrap","Gas Station BASE ETH","Gas Station ETH"] },
-  { id:"ops",            label:"Operational",          color:"#c0c0c0",    vaults:["Config operator Dev","Config operator Production","Config operator Staging","Deployer Dev","Deployer Production","Deployer Staging","Pauser Dev","Pauser Production","Pauser Staging","Reward Operator Dev","Reward Operator Production","Reward Operator Staging","Slasher Dev","Slasher Production","Slasher Staging"] },
+  { id:"ops",            label:"Operational",          color:"#c0c0c0", vaults:["Config operator Dev","Config operator Production","Config operator Staging","Deployer Dev","Deployer Production","Deployer Staging","Pauser Dev","Pauser Production","Pauser Staging","Reward Operator Dev","Reward Operator Production","Reward Operator Staging","Slasher Dev","Slasher Production","Slasher Staging"] },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const M = { fontFamily:"'JetBrains Mono',monospace" };
-const fmtTokens = n => { if(!n||n===0) return "—"; if(n>=1e9) return `${(n/1e9).toFixed(3)}B`; if(n>=1e6) return `${(n/1e6).toFixed(2)}M`; if(n>=1e3) return `${(n/1e3).toFixed(1)}K`; return Number(n).toLocaleString("en-US",{maximumFractionDigits:2}); };
-const fmtUsd    = n => { if(!n||n===0) return "—"; if(n>=1e6) return `$${(n/1e6).toFixed(2)}M`; if(n>=1e3) return `$${(n/1e3).toFixed(1)}K`; return `$${Number(n).toFixed(2)}`; };
-const fmtPrice  = n => n ? `$${Number(n).toFixed(5)}` : "—";
-const fmtDate   = s => { try { return new Date(s).toLocaleString("en-GB",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}); } catch { return s; } };
-const fmtDateShort = s => { try { return new Date(s).toLocaleDateString("en-GB",{day:"2-digit",month:"short"}); } catch { return s; } };
-const shortAddr = a => a ? `${a.slice(0,6)}…${a.slice(-4)}` : "—";
-const vaultName = a => a ? (ADDR_TO_VAULT[a.toLowerCase()] || shortAddr(a)) : "—";
-const isVault   = a => a && !!ADDR_TO_VAULT[a.toLowerCase()];
+
+const fmtTokens = (n) => {
+  if (!n || n === 0) return "—";
+  const x = Number(n);
+  if (x >= 1e9) return `${(x/1e9).toFixed(3)}B`;
+  if (x >= 1e6) return `${(x/1e6).toFixed(2)}M`;
+  if (x >= 1e3) return `${(x/1e3).toFixed(1)}K`;
+  return x.toLocaleString("en-US",{maximumFractionDigits:2});
+};
+
+const fmtUsd = (n) => {
+  if (!n || n === 0) return "—";
+  const x = Number(n);
+  if (x >= 1e6) return `$${(x/1e6).toFixed(2)}M`;
+  if (x >= 1e3) return `$${(x/1e3).toFixed(1)}K`;
+  return `$${x.toFixed(2)}`;
+};
+
+const fmtPrice = (n) => (n ? `$${Number(n).toFixed(5)}` : "—");
+
+const fmtDate = (s) => {
+  try { return new Date(s).toLocaleString("en-GB",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}); }
+  catch { return s; }
+};
+
+const fmtDateShort = (s) => {
+  try { return new Date(s).toLocaleDateString("en-GB",{day:"2-digit",month:"short"}); }
+  catch { return s; }
+};
+
+const shortAddr = (a) => (a ? `${a.slice(0,6)}…${a.slice(-4)}` : "—");
+const vaultName = (a) => (a ? (ADDR_TO_VAULT[a.toLowerCase()] || shortAddr(a)) : "—");
+const isVault   = (a) => a && !!ADDR_TO_VAULT[a.toLowerCase()];
 
 // ─── Dune fetch ───────────────────────────────────────────────────────────────
 async function fetchDune(queryId) {
@@ -75,7 +101,7 @@ async function fetchDune(queryId) {
     );
     const data = await res.json();
     return data?.result?.rows || [];
-  } catch(e) {
+  } catch (e) {
     console.error("Dune fetch error:", e);
     return [];
   }
@@ -94,14 +120,22 @@ async function fetchAukiPrice() {
   }
 }
 
-// ─── MEXC ticker ─────────────────────────────────────────────────────────────
+// ─── MEXC fetch (use Netlify function first to avoid CORS) ────────────────────
 async function fetchMexcTicker() {
+  // 1) Preferred: Netlify function proxy
+  try {
+    const r = await fetch("/.netlify/functions/mexc");
+    const j = await r.json();
+    if (j?.lastPrice) return { data: j, error: null };
+  } catch {}
+
+  // 2) Fallback: direct (may fail due to CORS in browsers)
   try {
     const res  = await fetch("https://api.mexc.com/api/v3/ticker/24hr?symbol=AUKIUSDT");
     const data = await res.json();
     if (data?.lastPrice) return { data, error: null };
     return { data: null, error: "No data" };
-  } catch(e) {
+  } catch (e) {
     return { data: null, error: e.message };
   }
 }
@@ -111,7 +145,24 @@ function Toggle({ value, onChange }) {
   return (
     <div style={{ display:"inline-flex", background:"#0D0D0D", border:"1px solid #2A2A2A", borderRadius:6, padding:3, gap:2 }}>
       {[["tokens","TOKENS"],["usd","USD"]].map(([v,l]) => (
-        <button key={v} onClick={()=>onChange(v)} style={{ padding:"5px 14px", borderRadius:4, border:"none", cursor:"pointer", ...M, fontSize:14, fontWeight:600, letterSpacing:"0.08em", background:value===v?"#C8A96E":"transparent", color:value===v?"#0D0D0D":"#555" }}>{l}</button>
+        <button
+          key={v}
+          onClick={() => onChange(v)}
+          style={{
+            padding:"5px 14px",
+            borderRadius:4,
+            border:"none",
+            cursor:"pointer",
+            ...M,
+            fontSize:14,
+            fontWeight:600,
+            letterSpacing:"0.08em",
+            background:value===v?"#C8A96E":"transparent",
+            color:value===v?"#0D0D0D":"#555"
+          }}
+        >
+          {l}
+        </button>
       ))}
     </div>
   );
@@ -121,7 +172,24 @@ function PeriodToggle({ value, onChange, options }) {
   return (
     <div style={{ display:"inline-flex", background:"#0D0D0D", border:"1px solid #1E1E1E", borderRadius:6, padding:2, gap:1 }}>
       {options.map(o => (
-        <button key={o.v} onClick={()=>onChange(o.v)} style={{ padding:"4px 10px", borderRadius:4, border:"none", cursor:"pointer", ...M, fontSize:13, fontWeight:600, letterSpacing:"0.08em", background:value===o.v?"#1E1E1E":"transparent", color:value===o.v?"#C8A96E":"#444" }}>{o.l}</button>
+        <button
+          key={o.v}
+          onClick={() => onChange(o.v)}
+          style={{
+            padding:"4px 10px",
+            borderRadius:4,
+            border:"none",
+            cursor:"pointer",
+            ...M,
+            fontSize:13,
+            fontWeight:600,
+            letterSpacing:"0.08em",
+            background:value===o.v?"#1E1E1E":"transparent",
+            color:value===o.v?"#C8A96E":"#444"
+          }}
+        >
+          {o.l}
+        </button>
       ))}
     </div>
   );
@@ -139,17 +207,25 @@ function StatCard({ label, value, sub, accent, loading }) {
   );
 }
 
+function Loader({ msg }) {
+  return (
+    <div style={{ textAlign:"center", padding:"60px 0", color:"#9a9a9a", ...M, fontSize:14, letterSpacing:"0.1em" }}>
+      <div style={{ marginBottom:12, fontSize:24 }}>⟳</div>
+      {msg || "LOADING…"}
+    </div>
+  );
+}
 
-function SupplyAllocationPie({ groups, totalsByGroup }) {
-  // totalsByGroup: array of { label, pct, color } where pct is 0-100
-  const size = 180;
-  const r = 70;
+// ─── Supply Allocation Pie (includes "Distributed") ───────────────────────────
+function SupplyAllocationPie({ totalsByGroup }) {
+  const size = 190;
+  const r = 74;
   const cx = size / 2;
   const cy = size / 2;
 
-  const segments = totalsByGroup.filter(s => s.pct > 0);
-  let a0 = -Math.PI / 2; // start at top
+  const segments = totalsByGroup.filter(s => s.pct > 0.0001);
 
+  let a0 = -Math.PI / 2; // start at top
   const paths = segments.map((s, idx) => {
     const a1 = a0 + (s.pct / 100) * 2 * Math.PI;
     const x0 = cx + r * Math.cos(a0);
@@ -170,18 +246,17 @@ function SupplyAllocationPie({ groups, totalsByGroup }) {
   return (
     <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        {/* subtle ring */}
         <circle cx={cx} cy={cy} r={r} fill="#1b1b1b" />
         {paths}
-        <circle cx={cx} cy={cy} r={r * 0.55} fill="#121212" />
+        <circle cx={cx} cy={cy} r={r * 0.56} fill="#121212" />
       </svg>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 220 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 240 }}>
         {totalsByGroup.map((s) => (
           <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 10, color: "#cfcfcf", fontSize: 13 }}>
             <span style={{ width: 10, height: 10, borderRadius: 999, background: s.color, display: "inline-block" }} />
-            <span style={{ flex: 1, opacity: 0.9 }}>{s.label}</span>
-            <span style={{ opacity: 0.8 }}>{s.pct.toFixed(1)}%</span>
+            <span style={{ flex: 1, opacity: 0.95 }}>{s.label}</span>
+            <span style={{ opacity: 0.85 }}>{s.pct.toFixed(1)}%</span>
           </div>
         ))}
       </div>
@@ -189,52 +264,22 @@ function SupplyAllocationPie({ groups, totalsByGroup }) {
   );
 }
 
-function Loader({ msg }) {
-  return (
-    <div style={{ textAlign:"center", padding:"60px 0", color:"#9a9a9a", ...M, fontSize:14, letterSpacing:"0.1em" }}>
-      <div style={{ marginBottom:12, fontSize:24 }}>⟳</div>
-      {msg || "LOADING…"}
-    </div>
-  );
-}
-
-// ─── MEXC Section ─────────────────────────────────────────────────────────────
-function MexcSection() {
-  const [ticker, setTicker]   = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState(null);
-  const [ts, setTs]           = useState(null);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    const result = await fetchMexcTicker();
-    if (result.data) {
-      setTicker(result.data);
-      setTs(new Date());
-      setError(null);
-    } else {
-      setError(result.error);
-    }
-    setLoading(false);
-  }, []);
-
-  useEffect(() => { refresh(); }, []);
-
-  const pctChange = ticker ? parseFloat(ticker.priceChangePercent) : null;
+// ─── MEXC Section (render-only, data injected) ────────────────────────────────
+function MexcSection({ ticker, loading, error, onRefresh, ts }) {
+  const pctChange = ticker?.priceChangePercent != null ? parseFloat(ticker.priceChangePercent) : null;
   const pctColor  = pctChange > 0 ? "#7CC4A4" : pctChange < 0 ? "#E07B5A" : "#555";
 
   return (
     <div style={{ background:"#0F0F0F", border:"1px solid #1E1E1E", borderRadius:8, overflow:"hidden", marginBottom:16 }}>
-      {/* Header */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 20px", borderBottom:"1px solid #1A1A1A" }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-          <div style={{ width:6, height:6, borderRadius:"50%", background: loading?"#333":"#7CC4A4" }}/>
+          <div style={{ width:6, height:6, borderRadius:"50%", background: loading ? "#333" : (error ? "#E07B5A" : "#7CC4A4") }}/>
           <span style={{ ...M, fontSize:14, fontWeight:700, letterSpacing:"0.08em", color:"#CCC" }}>MEXC · AUKI/USDT</span>
           <span style={{ ...M, fontSize:12, color:"#9a9a9a" }}>CENTRALISED EXCHANGE</span>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           {ts && <span style={{ ...M, fontSize:12, color:"#2E2E2E" }}>{ts.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</span>}
-          <button onClick={refresh} style={{ background:"none", border:"1px solid #222", borderRadius:4, color:"#444", fontSize:12, padding:"2px 6px", cursor:"pointer", ...M }}>↻</button>
+          <button onClick={onRefresh} style={{ background:"none", border:"1px solid #222", borderRadius:4, color:"#444", fontSize:12, padding:"2px 6px", cursor:"pointer", ...M }}>↻</button>
         </div>
       </div>
 
@@ -242,23 +287,23 @@ function MexcSection() {
         <div style={{ padding:"30px 20px", textAlign:"center", color:"#9a9a9a", ...M, fontSize:14 }}>FETCHING MEXC DATA…</div>
       ) : error ? (
         <div style={{ padding:"30px 20px", textAlign:"center", color:"#E07B5A", ...M, fontSize:14 }}>MEXC API unavailable — {error}</div>
-      ) : ticker && (
+      ) : ticker ? (
         <div style={{ padding:"16px 20px" }}>
-          {/* Main price row */}
           <div style={{ display:"flex", alignItems:"baseline", gap:12, marginBottom:16 }}>
             <span style={{ ...M, fontSize:32, fontWeight:700, color:"#F0ECE3", letterSpacing:"-0.02em" }}>${parseFloat(ticker.lastPrice).toFixed(6)}</span>
-            <span style={{ ...M, fontSize:15, fontWeight:600, color:pctColor }}>
-              {pctChange > 0 ? "▲" : pctChange < 0 ? "▼" : ""} {Math.abs(pctChange).toFixed(2)}% (24h)
-            </span>
+            {pctChange != null && (
+              <span style={{ ...M, fontSize:15, fontWeight:600, color:pctColor }}>
+                {pctChange > 0 ? "▲" : pctChange < 0 ? "▼" : ""} {Math.abs(pctChange).toFixed(2)}% (24h)
+              </span>
+            )}
           </div>
 
-          {/* Stats grid */}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))", gap:10, marginBottom:12 }}>
             {[
               { l:"24H HIGH",    v:`$${parseFloat(ticker.highPrice).toFixed(6)}`,   c:"#7CC4A4" },
               { l:"24H LOW",     v:`$${parseFloat(ticker.lowPrice).toFixed(6)}`,    c:"#E07B5A" },
-              { l:"24H VOLUME",  v:fmtTokens(parseFloat(ticker.volume)),             c:"#F0ECE3" },
-              { l:"QUOTE VOL",   v:fmtUsd(parseFloat(ticker.quoteVolume)),           c:"#F0ECE3" },
+              { l:"24H VOLUME (AUKI)",  v:fmtTokens(parseFloat(ticker.volume)),     c:"#F0ECE3" },
+              { l:"24H VOLUME (USDT)",  v:fmtUsd(parseFloat(ticker.quoteVolume)),   c:"#F0ECE3" },
             ].map(s=>(
               <div key={s.l} style={{ background:"#141414", borderRadius:6, padding:"10px 14px" }}>
                 <div style={{ ...M, fontSize:11, color:"#444", letterSpacing:"0.1em", marginBottom:5 }}>{s.l}</div>
@@ -267,7 +312,6 @@ function MexcSection() {
             ))}
           </div>
 
-          {/* Bid/Ask spread */}
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
             <div style={{ background:"#0D1A12", border:"1px solid #1A2E1A", borderRadius:6, padding:"10px 14px" }}>
               <div style={{ ...M, fontSize:11, color:"#444", letterSpacing:"0.1em", marginBottom:5 }}>BID</div>
@@ -281,11 +325,12 @@ function MexcSection() {
             </div>
           </div>
 
-          {/* Spread */}
           <div style={{ marginTop:10, ...M, fontSize:12, color:"#444" }}>
             SPREAD: ${(parseFloat(ticker.askPrice) - parseFloat(ticker.bidPrice)).toFixed(6)} · {(((parseFloat(ticker.askPrice) - parseFloat(ticker.bidPrice)) / parseFloat(ticker.bidPrice)) * 100).toFixed(3)}%
           </div>
         </div>
+      ) : (
+        <div style={{ padding:"30px 20px", textAlign:"center", color:"#E07B5A", ...M, fontSize:14 }}>MEXC returned no data</div>
       )}
     </div>
   );
@@ -294,7 +339,7 @@ function MexcSection() {
 // ─── Tab 1: Vault Balances ────────────────────────────────────────────────────
 function VaultBalancesTab({ balances, mode, price }) {
   const [expanded, setExpanded] = useState({ team:true, foundation:true, ecosystem:true, investors:false, infrastructure:true, ops:false });
-  const disp = n => !n||n===0 ? "—" : mode==="tokens" ? fmtTokens(n) : fmtUsd(n*(price||0));
+  const disp = (n) => !n||n===0 ? "—" : mode==="tokens" ? fmtTokens(n) : fmtUsd(n*(price||0));
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
@@ -303,16 +348,18 @@ function VaultBalancesTab({ balances, mode, price }) {
           <div key={h} style={{ fontSize:11, color:"#9a9a9a", letterSpacing:"0.1em", ...M, textAlign:i===0?"left":"right" }}>{h}</div>
         ))}
       </div>
+
       {VAULT_GROUPS.map(g => {
         const gvaults     = g.vaults.map(n => ({ name:n, balance:balances[n]||0 }));
         const gTotal      = gvaults.reduce((s,v)=>s+v.balance,0);
         const pct         = ((gTotal/TOTAL_SUPPLY)*100).toFixed(1);
         const activeCount = gvaults.filter(v=>v.balance>0).length;
         const isExp       = !!expanded[g.id];
+
         return (
           <div key={g.id} style={{ background:"#0F0F0F", border:"1px solid #1E1E1E", borderRadius:8, overflow:"hidden" }}>
             <div
-              onClick={()=>setExpanded(p=>({...p,[g.id]:!p[g.id]}))}
+              onClick={() => setExpanded(p=>({...p,[g.id]:!p[g.id]}))}
               style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 20px", cursor:"pointer", userSelect:"none", borderBottom:isExp?"1px solid #1A1A1A":"none" }}
               onMouseEnter={e=>e.currentTarget.style.background="#131313"}
               onMouseLeave={e=>e.currentTarget.style.background="transparent"}
@@ -330,9 +377,11 @@ function VaultBalancesTab({ balances, mode, price }) {
                 <span style={{ color:"#2E2E2E", fontSize:12 }}>{isExp?"▲":"▼"}</span>
               </div>
             </div>
+
             <div style={{ height:2, background:"#1A1A1A" }}>
               <div style={{ height:"100%", width:`${pct}%`, background:g.color, opacity:0.5 }} />
             </div>
+
             {isExp && gvaults.map((v,i) => {
               const empty = v.balance===0;
               return (
@@ -371,8 +420,8 @@ function MovementLogTab({ movements, mode, price }) {
     return true;
   });
 
-  const disp   = n => mode==="tokens" ? fmtTokens(n) : fmtUsd(n*(price||0));
-  const typeOf = m => !isVault(m.from)?"deposit":!isVault(m.to)?"withdrawal":"internal";
+  const disp   = (n) => mode==="tokens" ? fmtTokens(n) : fmtUsd(n*(price||0));
+  const typeOf = (m) => !isVault(m.from) ? "deposit" : (!isVault(m.to) ? "withdrawal" : "internal");
   const TC     = { deposit:"#7CC4A4", withdrawal:"#E07B5A", internal:"#7B9ECC" };
   const TL     = { deposit:"DEPOSIT", withdrawal:"WITHDRAWAL", internal:"INTERNAL" };
 
@@ -384,19 +433,22 @@ function MovementLogTab({ movements, mode, price }) {
         <PeriodToggle value={period} onChange={setPeriod} options={[{v:"1d",l:"24H"},{v:"7d",l:"7D"},{v:"30d",l:"30D"},{v:"90d",l:"90D"},{v:"all",l:"ALL"}]} />
         <select value={vaultFilter} onChange={e=>setVaultFilter(e.target.value)} style={{ background:"#0D0D0D", border:"1px solid #1E1E1E", borderRadius:6, color:"#888", ...M, fontSize:13, padding:"5px 10px", cursor:"pointer" }}>
           <option value="all">All vaults</option>
-          {vaultNames.map(n=><option key={n} value={n}>{n}</option>)}
+          {vaultNames.map(n => <option key={n} value={n}>{n}</option>)}
         </select>
         <span style={{ marginLeft:"auto", color:"#2E2E2E", fontSize:13, ...M }}>{filtered.length} transactions</span>
       </div>
+
       <div style={{ background:"#0F0F0F", border:"1px solid #1E1E1E", borderRadius:8, overflow:"hidden" }}>
         <div style={{ display:"grid", gridTemplateColumns:"150px 110px 1fr 1fr 130px", gap:12, padding:"14px 20px", borderBottom:"1px solid #1A1A1A" }}>
-          {["DATE","TYPE","FROM","TO","AMOUNT"].map(h=>(
+          {["DATE","TYPE","FROM","TO","AMOUNT"].map(h => (
             <div key={h} style={{ fontSize:11, color:"#9a9a9a", letterSpacing:"0.1em", ...M }}>{h}</div>
           ))}
         </div>
-        {filtered.length===0
-          ? <div style={{ padding:"40px 20px", textAlign:"center", color:"#9a9a9a", ...M, fontSize:14 }}>No movements in this period</div>
-          : filtered.map((m,i) => {
+
+        {filtered.length === 0 ? (
+          <div style={{ padding:"40px 20px", textAlign:"center", color:"#9a9a9a", ...M, fontSize:14 }}>No movements in this period</div>
+        ) : (
+          filtered.map((m,i) => {
             const type  = typeOf(m);
             const color = TC[type];
             return (
@@ -413,26 +465,26 @@ function MovementLogTab({ movements, mode, price }) {
               </div>
             );
           })
-        }
+        )}
       </div>
     </div>
   );
 }
 
 // ─── Tab 3: Market Activity ───────────────────────────────────────────────────
-function MarketActivityTab({ daily, recentTrades }) {
+function MarketActivityTab({ daily, recentTrades, mexc }) {
   const [period, setPeriod] = useState("30d");
 
   const now  = new Date();
   const msOf = { "7d":7*864e5, "30d":30*864e5, "90d":90*864e5, "1y":365*864e5, "all":Infinity };
 
-  const filteredDaily = daily.filter(d => now - new Date(d.day.replace(' UTC','').replace(' ','T')+'Z') <= msOf[period]);
+  const filteredDaily = daily.filter(d => now - new Date(d.day.replace(" UTC","").replace(" ","T")+"Z") <= msOf[period]);
 
   const totalVolUsd  = filteredDaily.reduce((s,d)=>s+(d.volume_usd||0),0);
   const totalBuyVol  = filteredDaily.reduce((s,d)=>s+(d.buy_volume||0),0);
   const totalSellVol = filteredDaily.reduce((s,d)=>s+(d.sell_volume||0),0);
   const avgPrice     = filteredDaily.length>0
-    ? filteredDaily.reduce((s,d)=>s+((d.high+d.low)/2||0),0)/filteredDaily.length : 0;
+    ? filteredDaily.reduce((s,d)=>s+(((d.high+d.low)/2)||0),0)/filteredDaily.length : 0;
 
   const chart  = [...filteredDaily].sort((a,b)=>new Date(a.day)-new Date(b.day));
   const prices = chart.map(d=>(d.high+d.low)/2).filter(p=>p>0);
@@ -445,13 +497,17 @@ function MarketActivityTab({ daily, recentTrades }) {
 
   return (
     <div>
-      {/* MEXC Section — always shown at top */}
       <div style={{ marginBottom:20 }}>
         <div style={{ fontSize:12, color:"#9a9a9a", letterSpacing:"0.12em", ...M, marginBottom:10 }}>CENTRALISED EXCHANGE</div>
-        <MexcSection />
+        <MexcSection
+          ticker={mexc.ticker}
+          loading={mexc.loading}
+          error={mexc.error}
+          onRefresh={mexc.refresh}
+          ts={mexc.ts}
+        />
       </div>
 
-      {/* DEX section */}
       <div style={{ fontSize:12, color:"#9a9a9a", letterSpacing:"0.12em", ...M, marginBottom:10 }}>DECENTRALISED EXCHANGE (ON-CHAIN · BASE)</div>
 
       <div style={{ display:"flex", gap:8, marginBottom:16, alignItems:"center" }}>
@@ -459,7 +515,6 @@ function MarketActivityTab({ daily, recentTrades }) {
         <span style={{ marginLeft:"auto", color:"#2E2E2E", fontSize:13, ...M }}>{filteredDaily.length} days · Uniswap · Aerodrome · PancakeSwap</span>
       </div>
 
-      {/* Summary cards */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, marginBottom:16 }}>
         {[
           { l:"AVG PRICE",    v:avgPrice?fmtPrice(avgPrice):"—", a:"#C8A96E" },
@@ -474,7 +529,6 @@ function MarketActivityTab({ daily, recentTrades }) {
         ))}
       </div>
 
-      {/* Price chart */}
       {chart.length > 1 && (
         <div style={{ background:"#0F0F0F", border:"1px solid #1E1E1E", borderRadius:8, padding:"16px 20px", marginBottom:16 }}>
           <div style={{ fontSize:12, color:"#9a9a9a", letterSpacing:"0.1em", ...M, marginBottom:12 }}>PRICE (AUKI / USD) — DAILY</div>
@@ -497,9 +551,6 @@ function MarketActivityTab({ daily, recentTrades }) {
                 return <>
                   <path d={`${line} L800,${H} L0,${H} Z`} fill="url(#pg)"/>
                   <path d={line} fill="none" stroke="#C8A96E" strokeWidth="1.5"/>
-                  {pts.filter((_,i)=>i%Math.max(1,Math.floor(pts.length/30))===0).map((p,i)=>(
-                    <circle key={i} cx={p.x} cy={p.y} r="2" fill="#C8A96E"/>
-                  ))}
                 </>;
               })()}
             </svg>
@@ -514,7 +565,6 @@ function MarketActivityTab({ daily, recentTrades }) {
         </div>
       )}
 
-      {/* Buy/sell bar */}
       {(totalBuyVol+totalSellVol)>0 && (
         <div style={{ background:"#0F0F0F", border:"1px solid #1E1E1E", borderRadius:8, padding:"14px 20px", marginBottom:16 }}>
           <div style={{ fontSize:12, color:"#9a9a9a", letterSpacing:"0.1em", ...M, marginBottom:10 }}>BUY / SELL PRESSURE</div>
@@ -529,7 +579,6 @@ function MarketActivityTab({ daily, recentTrades }) {
         </div>
       )}
 
-      {/* Daily breakdown table */}
       <div style={{ background:"#0F0F0F", border:"1px solid #1E1E1E", borderRadius:8, overflow:"hidden", marginBottom:16 }}>
         <div style={{ display:"grid", gridTemplateColumns:"120px 110px 110px 120px 120px 80px", gap:12, padding:"14px 20px", borderBottom:"1px solid #1A1A1A" }}>
           {["DATE","LOW","HIGH","BUY VOL","SELL VOL","TRADES"].map(h=>(
@@ -552,7 +601,6 @@ function MarketActivityTab({ daily, recentTrades }) {
         ))}
       </div>
 
-      {/* Recent trade feed */}
       {filteredTrades.length > 0 && (
         <div style={{ background:"#0F0F0F", border:"1px solid #1E1E1E", borderRadius:8, overflow:"hidden" }}>
           <div style={{ padding:"12px 20px", borderBottom:"1px solid #1A1A1A", fontSize:12, color:"#9a9a9a", letterSpacing:"0.1em", ...M }}>
@@ -597,8 +645,8 @@ async function hashPassword(pw) {
 }
 
 function LoginScreen({ onAuth }) {
-  const [pw, setPw]         = useState("");
-  const [error, setError]   = useState(false);
+  const [pw, setPw] = useState("");
+  const [error, setError] = useState(false);
   const [checking, setChecking] = useState(false);
 
   const attempt = async () => {
@@ -620,16 +668,22 @@ function LoginScreen({ onAuth }) {
         </div>
         <div style={{ fontSize:12, color:"#444", letterSpacing:"0.12em", marginBottom:10 }}>ACCESS CODE</div>
         <input
-          type="password" value={pw} autoFocus
+          type="password"
+          value={pw}
+          autoFocus
           onChange={e=>{ setPw(e.target.value); setError(false); }}
           onKeyDown={e=>e.key==="Enter"&&pw&&attempt()}
           placeholder="Enter password"
           style={{ width:"100%", background:"#0D0D0D", border:`1px solid ${error?"#E07B5A":"#2A2A2A"}`, borderRadius:6, padding:"10px 14px", color:"#F0ECE3", fontFamily:"'JetBrains Mono',monospace", fontSize:15, outline:"none", marginBottom:8, boxSizing:"border-box" }}
         />
         {error && <div style={{ color:"#E07B5A", fontSize:13, marginBottom:8 }}>Incorrect password</div>}
-        <button onClick={attempt} disabled={checking||!pw}
+        <button
+          onClick={attempt}
+          disabled={checking||!pw}
           style={{ width:"100%", background:"#C8A96E", border:"none", borderRadius:6, padding:"10px", color:"#0D0D0D", fontFamily:"'JetBrains Mono',monospace", fontSize:14, fontWeight:700, letterSpacing:"0.08em", cursor:pw?"pointer":"not-allowed", opacity:pw?1:0.5, marginTop:4 }}
-        >{checking?"CHECKING...":"ENTER"}</button>
+        >
+          {checking?"CHECKING...":"ENTER"}
+        </button>
       </div>
     </div>
   );
@@ -637,18 +691,24 @@ function LoginScreen({ onAuth }) {
 
 export default function AukiTreasury() {
   const [authed, setAuthed] = useState(!!sessionStorage.getItem("auki_auth"));
-  const [mode,       setMode]       = useState("tokens");
-  const [activeTab,  setActiveTab]  = useState("balances");
-  const [price,      setPrice]      = useState(null);
-  const [priceTs,    setPriceTs]    = useState(null);
+
+  const [mode, setMode]             = useState("tokens");
+  const [activeTab, setActiveTab]   = useState("balances");
+
+  const [price, setPrice]           = useState(null);
+  const [priceTs, setPriceTs]       = useState(null);
   const [priceState, setPriceState] = useState("loading");
-  const [balances,   setBalances]   = useState({});
-  const [movements,  setMovements]  = useState([]);
-  const [trades,     setTrades]     = useState([]);
-  const [daily,      setDaily]      = useState([]);
+
+  const [balances, setBalances]     = useState({});
+  const [movements, setMovements]   = useState([]);
+  const [trades, setTrades]         = useState([]);
+  const [daily, setDaily]           = useState([]);
+
   const [mexcTicker, setMexcTicker] = useState(null);
-  const [mexcError,  setMexcError]  = useState("");
-  const [loading,    setLoading]    = useState({ balances:true, movements:true, trades:true, daily:true, mexc:true });
+  const [mexcTs, setMexcTs]         = useState(null);
+  const [mexcError, setMexcError]   = useState("");
+
+  const [loading, setLoading] = useState({ balances:true, movements:true, trades:true, daily:true, mexc:true });
 
   const doFetchPrice = useCallback(async () => {
     setPriceState("loading");
@@ -658,22 +718,30 @@ export default function AukiTreasury() {
     setPriceState(result.source);
   }, []);
 
+  const doFetchMexc = useCallback(async () => {
+    setLoading(p => ({...p, mexc:true}));
+    const result = await fetchMexcTicker();
+    if (result.data) {
+      setMexcTicker(result.data);
+      setMexcTs(new Date());
+      setMexcError("");
+    } else {
+      setMexcTicker(null);
+      setMexcError(result.error || "MEXC fetch failed");
+    }
+    setLoading(p => ({...p, mexc:false}));
+  }, []);
+
   useEffect(() => {
     doFetchPrice();
-
-
-fetchMexcTicker().then(t => {
-  setMexcTicker(t);
-  setMexcError("");
-  setLoading(p=>({...p,mexc:false}));
-}).catch((e) => {
-  setMexcError(e?.message || "MEXC fetch failed");
-  setLoading(p=>({...p,mexc:false}));
-});
+    doFetchMexc();
 
     fetchDune(QUERY_BALANCES).then(rows => {
       const map = {};
-      rows.forEach(r => { const n = ADDR_TO_VAULT[r.address?.toLowerCase()]; if(n) map[n] = r.balance; });
+      rows.forEach(r => {
+        const n = ADDR_TO_VAULT[r.address?.toLowerCase()];
+        if (n) map[n] = r.balance;
+      });
       setBalances(map);
       setLoading(p=>({...p,balances:false}));
     }).catch(() => setLoading(p=>({...p,balances:false})));
@@ -692,12 +760,38 @@ fetchMexcTicker().then(t => {
       setDaily(rows);
       setLoading(p=>({...p,daily:false}));
     }).catch(() => setLoading(p=>({...p,daily:false})));
-  }, []);
+  }, [doFetchPrice, doFetchMexc]);
 
-  const totalHeld   = Object.values(balances).reduce((s,v)=>s+v,0);
-  const activeCount = Object.values(balances).filter(v=>v>0).length;
-  const dp          = price||0;
-  const trades24h   = trades.filter(t=>new Date()-new Date(t.block_time)<864e5);
+  const totalHeld = useMemo(() => Object.values(balances).reduce((s,v)=>s+Number(v||0),0), [balances]);
+  const activeCount = useMemo(() => Object.values(balances).filter(v=>Number(v||0)>0).length, [balances]);
+
+  const dp = price || 0;
+  const trades24h = useMemo(() => trades.filter(t => new Date() - new Date(t.block_time) < 864e5), [trades]);
+
+  const dexVol24hUsd = useMemo(() => trades24h.reduce((s,t)=>s+(t.amount_usd||0),0), [trades24h]);
+
+  const mexcVol24hUsd = useMemo(() => {
+    // MEXC quoteVolume is in USDT for AUKIUSDT
+    if (!mexcTicker?.quoteVolume) return 0;
+    const q = parseFloat(mexcTicker.quoteVolume);
+    return Number.isFinite(q) ? q : 0;
+  }, [mexcTicker]);
+
+  const supplyPieData = useMemo(() => {
+    const vaultSegments = VAULT_GROUPS.map(g => {
+      const tot = g.vaults.reduce((s,n)=>s+Number(balances[n]||0),0);
+      const pct = (tot / TOTAL_SUPPLY) * 100;
+      return { label: g.label, pct, color: g.color };
+    });
+
+    const vaultPct = vaultSegments.reduce((s,x)=>s+(x.pct||0),0);
+    const distributedPct = Math.max(0, 100 - vaultPct);
+
+    return [
+      ...vaultSegments,
+      { label: "Distributed", pct: distributedPct, color: "#2f2f2f" },
+    ].map(x => ({...x, pct: Number.isFinite(x.pct) ? x.pct : 0 }));
+  }, [balances]);
 
   if (!authed) return <LoginScreen onAuth={() => setAuthed(true)} />;
 
@@ -705,7 +799,6 @@ fetchMexcTicker().then(t => {
     <div style={{ minHeight:"100vh", background:"#080808", color:"#F0ECE3", ...M }}>
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}} *{box-sizing:border-box}`}</style>
 
-      {/* Header */}
       <div style={{ borderBottom:"1px solid #161616", padding:"13px 32px", display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, background:"#080808", zIndex:10 }}>
         <div style={{ display:"flex", alignItems:"center", gap:12 }}>
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -720,6 +813,7 @@ fetchMexcTicker().then(t => {
             <span style={{ fontSize:13, color:"#3A3A3A", letterSpacing:"0.08em" }}>LIVE · BASE BLOCKCHAIN</span>
           </div>
         </div>
+
         <div style={{ display:"flex", alignItems:"center", gap:12 }}>
           {priceState==="loading"
             ? <span style={{ color:"#444", fontSize:13 }}>FETCHING…</span>
@@ -735,39 +829,61 @@ fetchMexcTicker().then(t => {
       </div>
 
       <div style={{ padding:"26px 32px", maxWidth:1400, margin:"0 auto" }}>
-
-        {/* Stat cards */}
-        <div style={{ display:"flex", gap:10, marginBottom:22 }}>
-          <StatCard label="Total Supply"     value="10.000B"                                                          sub="Max supply · minted Aug 2024"                         loading={false}/>
-          <StatCard label="Held in Vaults"   value={mode==="tokens"?fmtTokens(totalHeld):fmtUsd(totalHeld*dp)}       sub={`${((totalHeld/TOTAL_SUPPLY)*100).toFixed(2)}% · ${activeCount} active vaults`} accent="#C8A96E" loading={loading.balances}/>
-          <StatCard label="24H DEX Volume"   value={fmtUsd(trades24h.reduce((s,t)=>s+(t.amount_usd||0),0))}          sub={`${trades24h.length} on-chain trades`}                 loading={loading.trades}/>
-          <StatCard label="Live Price"       value={priceState==="loading"?"…":fmtPrice(price)}                       sub="CoinGecko · auto-refreshes"                           accent="#C8A96E" loading={priceState==="loading"}/>
+        <div style={{ display:"flex", gap:10, marginBottom:22, flexWrap:"wrap" }}>
+          <StatCard
+            label="Total Supply"
+            value="10.000B"
+            sub="Max supply · minted Aug 2024"
+            loading={false}
+          />
+          <StatCard
+            label="Held in Vaults"
+            value={mode==="tokens" ? fmtTokens(totalHeld) : fmtUsd(totalHeld*dp)}
+            sub={`${((totalHeld/TOTAL_SUPPLY)*100).toFixed(2)}% · ${activeCount} active vaults`}
+            accent="#C8A96E"
+            loading={loading.balances}
+          />
+          <StatCard
+            label="24H DEX Volume"
+            value={fmtUsd(dexVol24hUsd)}
+            sub={`${trades24h.length} on-chain trades`}
+            loading={loading.trades}
+          />
+          <StatCard
+            label="24H CEX Volume"
+            value={loading.mexc ? "…" : fmtUsd(mexcVol24hUsd)}
+            sub={mexcError ? `MEXC: ${mexcError}` : (mexcTicker ? "MEXC AUKI/USDT · quote vol" : "MEXC unavailable")}
+            accent="#C8A96E"
+            loading={false}
+          />
         </div>
 
+        <div style={{ background:"#111", border:"1px solid #1E1E1E", borderRadius:12, padding:"18px 22px", marginBottom:18 }}>
+          <div style={{ fontSize:12, color:"#9a9a9a", letterSpacing:"0.1em", marginBottom:10 }}>AUKI SUPPLY ALLOCATION</div>
+          <SupplyAllocationPie totalsByGroup={supplyPieData} />
+        </div>
 
-{/* Allocation pie */}
-<div style={{ background:"#111", border:"1px solid #1E1E1E", borderRadius:12, padding:"18px 22px", marginBottom:18 }}>
-  <div style={{ fontSize:12, color:"#9a9a9a", letterSpacing:"0.1em", marginBottom:10 }}>AUKI SUPPLY ALLOCATION</div>
-  {(() => {
-    const totalsByGroup = VAULT_GROUPS.map(g => {
-      const tot = g.vaults.reduce((s,n)=>s+(balances[n]||0),0);
-      const pct = (tot / TOTAL_SUPPLY) * 100;
-      return { label: g.label, pct, color: g.color };
-    });
-    return <SupplyAllocationPie groups={VAULT_GROUPS} totalsByGroup={totalsByGroup} />;
-  })()}
-</div>
-
-        {/* Tabs */}
         <div style={{ display:"flex", marginBottom:16, borderBottom:"1px solid #161616" }}>
           {[["balances","VAULT BALANCES"],["movements","MOVEMENT LOG"],["market","MARKET ACTIVITY"]].map(([id,lbl])=>(
-            <button key={id} onClick={()=>setActiveTab(id)} style={{ background:"none", border:"none", borderBottom:activeTab===id?"2px solid #C8A96E":"2px solid transparent", color:activeTab===id?"#C8A96E":"#3A3A3A", ...M, fontSize:13, fontWeight:700, letterSpacing:"0.1em", padding:"9px 20px 9px 0", marginRight:18, cursor:"pointer" }}>{lbl}</button>
+            <button
+              key={id}
+              onClick={()=>setActiveTab(id)}
+              style={{ background:"none", border:"none", borderBottom:activeTab===id?"2px solid #C8A96E":"2px solid transparent", color:activeTab===id?"#C8A96E":"#3A3A3A", ...M, fontSize:13, fontWeight:700, letterSpacing:"0.1em", padding:"9px 20px 9px 0", marginRight:18, cursor:"pointer" }}
+            >
+              {lbl}
+            </button>
           ))}
         </div>
 
         {activeTab==="balances"  && (loading.balances  ? <Loader msg="FETCHING VAULT BALANCES…"/>  : <VaultBalancesTab balances={balances} mode={mode} price={dp}/>)}
-        {activeTab==="movements" && (loading.movements ? <Loader msg="FETCHING MOVEMENT LOG…"/>    : <MovementLogTab   movements={movements} mode={mode} price={dp}/>)}
-        {activeTab==="market"    && (loading.daily     ? <Loader msg="FETCHING MARKET DATA…"/>     : <MarketActivityTab daily={daily} recentTrades={trades}/>)}
+        {activeTab==="movements" && (loading.movements ? <Loader msg="FETCHING MOVEMENT LOG…"/>    : <MovementLogTab movements={movements} mode={mode} price={dp}/>)}
+        {activeTab==="market"    && (loading.daily     ? <Loader msg="FETCHING MARKET DATA…"/>     : (
+          <MarketActivityTab
+            daily={daily}
+            recentTrades={trades}
+            mexc={{ ticker: mexcTicker, loading: loading.mexc, error: mexcError, refresh: doFetchMexc, ts: mexcTs }}
+          />
+        ))}
       </div>
     </div>
   );

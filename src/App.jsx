@@ -483,6 +483,24 @@ function MarketActivityTab({ daily, recentTrades, mexc }) {
   const totalVolUsd  = filteredDaily.reduce((s,d)=>s+(d.volume_usd||0),0);
   const totalBuyVol  = filteredDaily.reduce((s,d)=>s+(d.buy_volume||0),0);
   const totalSellVol = filteredDaily.reduce((s,d)=>s+(d.sell_volume||0),0);
+  const dexChange24h = (() => {
+  const s = [...filteredDaily]
+    .map(d => ({
+      t: new Date(d.day.replace(' UTC','').replace(' ','T')+'Z'),
+      mid: ((d.high || 0) + (d.low || 0)) / 2
+    }))
+    .filter(x => x.mid > 0 && !Number.isNaN(x.t.valueOf()))
+    .sort((a,b)=>a.t-b.t);
+
+  if (s.length < 2) return null;
+
+  const last = s[s.length-1].mid;
+  const prev = s[s.length-2].mid;
+
+  if (prev <= 0) return null;
+
+  return ((last/prev)-1)*100;
+})();
 
   // Robust average: USD volume / AUKI volume (VWAP-style)
   const totalAukiVol = totalBuyVol + totalSellVol;
@@ -517,8 +535,9 @@ function MarketActivityTab({ daily, recentTrades, mexc }) {
         <span style={{ marginLeft:"auto", color:"#2E2E2E", fontSize:13, ...M }}>{filteredDaily.length} days · Uniswap · Aerodrome · PancakeSwap</span>
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, marginBottom:16 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:8, marginBottom:16 }}>
         {[
+          { l:"24H PRICE CHANGE", v:dexChange24h==null?"—":`${dexChange24h.toFixed(2)}%`, a:dexChange24h>=0?"#7CC4A4":"#E07B5A" },
           { l:"AVG PRICE",    v:avgPrice?fmtPrice(avgPrice):"—", a:"#C8A96E" },
           { l:"VOLUME (USD)", v:fmtUsd(totalVolUsd),              a:"#F0ECE3" },
           { l:"BUY VOLUME",   v:fmtTokens(totalBuyVol),           a:"#7CC4A4" },

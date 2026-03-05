@@ -483,8 +483,10 @@ function MarketActivityTab({ daily, recentTrades, mexc }) {
   const totalVolUsd  = filteredDaily.reduce((s,d)=>s+(d.volume_usd||0),0);
   const totalBuyVol  = filteredDaily.reduce((s,d)=>s+(d.buy_volume||0),0);
   const totalSellVol = filteredDaily.reduce((s,d)=>s+(d.sell_volume||0),0);
-  const avgPrice     = filteredDaily.length>0
-    ? filteredDaily.reduce((s,d)=>s+(((d.high+d.low)/2)||0),0)/filteredDaily.length : 0;
+
+  // Robust average: USD volume / AUKI volume (VWAP-style)
+  const totalAukiVol = totalBuyVol + totalSellVol;
+  const avgPrice     = totalAukiVol > 0 ? (totalVolUsd / totalAukiVol) : 0;
 
   const chart  = [...filteredDaily].sort((a,b)=>new Date(a.day)-new Date(b.day));
   const prices = chart.map(d=>(d.high+d.low)/2).filter(p=>p>0);

@@ -782,7 +782,7 @@ export default function AukiTreasury() {
 const priceChange24h = useMemo(() => {
   if (!mexcTicker?.priceChangePercent) return null;
   const p = parseFloat(mexcTicker.priceChangePercent);
-  return Number.isFinite(p) ? p : null;
+  return Number.isFinite(p) ? p * 100 : null;
 }, [mexcTicker]);
 
   const supplyPieData = useMemo(() => {

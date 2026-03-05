@@ -730,6 +730,7 @@ export default function AukiTreasury() {
   const [mexcError, setMexcError]   = useState("");
 
   const [loading, setLoading] = useState({ balances:true, movements:true, trades:true, daily:true, mexc:true });
+  const [lastRefresh, setLastRefresh] = useState(null);
 
   const doFetchPrice = useCallback(async () => {
     setPriceState("loading");
@@ -780,6 +781,7 @@ export default function AukiTreasury() {
     fetchDune(QUERY_DAILY).then(rows => {
       setDaily(rows);
       setLoading(p=>({...p,daily:false}));
+    setLastRefresh(new Date());
     }).catch(() => setLoading(p=>({...p,daily:false})));
   }, [doFetchPrice, doFetchMexc]);
 
@@ -851,6 +853,28 @@ const priceChange24h = useMemo(() => {
                 <button onClick={doFetchPrice} title="Refresh price" style={{ background:"none", border:"1px solid #222", borderRadius:4, color:"#444", fontSize:12, padding:"2px 6px", cursor:"pointer", ...M }}>↻</button>
               </div>
           }
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <div style={{ color:"#9a9a9a", fontSize:12, ...M }}>
+            LAST UPDATED: {lastRefresh ? lastRefresh.toLocaleString("en-GB") : "—"}
+          </div>
+
+          <button
+            onClick={() => { doFetchPrice(); doFetchMexc(); }}
+            style={{
+              background:"none",
+              border:"1px solid #222",
+              borderRadius:6,
+              color:"#C0C0C0",
+              fontSize:12,
+              padding:"6px 10px",
+              cursor:"pointer",
+              ...M
+            }}
+          >
+            REFRESH
+          </button>
+        </div>
+
           <Toggle value={mode} onChange={setMode}/>
         </div>
       </div>

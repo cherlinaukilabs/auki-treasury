@@ -182,6 +182,14 @@ async function fetchMexcTicker() {
 }
 
 async function fetchMexcRecentTrades(limit = 50) {
+  // 1) Preferred: Netlify function proxy
+  try {
+    const r = await fetch(`/.netlify/functions/mexc?recentTrades=1&limit=${limit}`);
+    const j = await r.json();
+    if (Array.isArray(j)) return { data: j, error: null };
+  } catch {}
+
+  // 2) Fallback: direct
   try {
     const res = await fetch(`https://api.mexc.com/api/v3/trades?symbol=${MEXC_SYMBOL}&limit=${limit}`);
     const data = await res.json();

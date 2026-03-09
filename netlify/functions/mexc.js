@@ -1,36 +1,63 @@
 import { requireBasicAuth } from "./_auth.js";
 
 export async function handler(event) {
+
   const auth = requireBasicAuth(event);
   if (!auth.ok) return auth.response;
 
-  const symbol = event.queryStringParameters?.symbol || "AUKIUSDT";
-  const url = `https://api.mexc.com/api/v3/ticker/24hr?symbol=${encodeURIComponent(symbol)}`;
+  const params = event.queryStringParameters || {};
+  const symbol = params.symbol || "AUKIUSDT";
 
   try {
-    const res = await fetch(url, { headers: { "Accept": "application/json" } });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
+
+    // ─── RECENT TRADES ENDPOINT ─────────────────────
+    if (params.recentTrades) {
+
+      const limit = params.limit || 50;
+
+      const res = await fetch(
+        `https://api.mexc.com/api/v3/trades?symbol=${encodeURIComponent(symbol)}&limit=${limit}`
+      );
+
+      const data = await res.json();
+
       return {
-        statusCode: 502,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ error: `MEXC error ${res.status}`, detail: text.slice(0, 800) }),
+        statusCode: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "public, max-age=5"
+        },
+        body: JSON.stringify(data)
       };
+
     }
+
+    // ─── TICKER (existing behaviour) ─────────────────
+    const res = await fetch(
+      `https://api.mexc.com/api/v3/ticker/24hr?symbol=${encodeURIComponent(symbol)}`
+    );
+
     const data = await res.json();
+
     return {
       statusCode: 200,
       headers: {
         "Content-Type": "application/json",
-        "Cache-Control": "public, max-age=30",
+        "Cache-Control": "public, max-age=30"
       },
-      body: JSON.stringify(data),
+      body: JSON.stringify(data)
     };
+
   } catch (e) {
+
     return {
       statusCode: 500,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "Server exception", detail: e?.message || String(e) }),
+      body: JSON.stringify({
+        error: "Server exception",
+        detail: e?.message || String(e)
+      })
     };
+
   }
 }

@@ -774,7 +774,7 @@ function DexMarketActivityTab({ daily, recentTrades }) {
         <div style={{ background: "#0F0F0F", border: "1px solid #1E1E1E", borderRadius: 8, overflow: "hidden" }}>
           <div style={{ padding: "12px 20px", borderBottom: "1px solid #1A1A1A", fontSize: 12, color: "#9a9a9a", letterSpacing: "0.1em", ...M }}>RECENT INDIVIDUAL DEX TRADES</div>
           <div style={{ display: "grid", gridTemplateColumns: "150px 70px 140px 120px 110px", gap: 12, padding: "14px 20px", borderBottom: "1px solid #1A1A1A" }}>
-            {["DATE", "TYPE", "AUKI AMOUNT", "USD VALUE", "PRICE / AUKI"].map((h) => (
+            {["ICON", "DATE", "TYPE", "AUKI AMOUNT", "USD VALUE", "PRICE / AUKI"].map((h) => (
               <div key={h} style={{ fontSize: 11, color: "#9a9a9a", letterSpacing: "0.1em", ...M }}>
                 {h}
               </div>
@@ -786,10 +786,11 @@ function DexMarketActivityTab({ daily, recentTrades }) {
             return (
               <div
                 key={i}
-                style={{ display: "grid", gridTemplateColumns: "150px 70px 140px 120px 110px", gap: 12, padding: "12px 20px", borderBottom: i < Math.min(filteredTrades.length, 100) - 1 ? "1px solid #141414" : "none", ...M, fontSize: 14 }}
+                style={{ display: "grid", gridTemplateColumns: "70px 150px 70px 140px 120px 110px", gap: 12, padding: "12px 20px", borderBottom: i < Math.min(filteredTrades.length, 100) - 1 ? "1px solid #141414" : "none", ...M, fontSize: 14 }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = "#131313")}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               >
+                <div>{getTradeSizeIcon(t.amount_usd)}</div>
                 <div style={{ color: "#c0c0c0" }}>{fmtDate(t.block_time)}</div>
                 <div>
                   <span style={{ color, fontSize: 12, fontWeight: 700, padding: "2px 6px", background: `${color}18`, borderRadius: 3 }}>{buy ? "BUY" : "SELL"}</span>

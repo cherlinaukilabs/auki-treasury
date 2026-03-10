@@ -238,7 +238,7 @@ function Toggle({ value, onChange }) {
 
 function PeriodToggle({ value, onChange, options }) {
   return (
-    <div style={{ display: "inline-flex", background: "#0D0D0D", border: "1px solid #1E1E1E", borderRadius: 6, padding: 2, gap: 1 }}>
+    <div style={{ display: "inline-flex", background: "#0D0D0D", border: "1px solid #2A3440", borderRadius: 6, padding: 2, gap: 1 }}>
       {options.map((o) => (
         <button
           key={o.v}
@@ -265,10 +265,10 @@ function PeriodToggle({ value, onChange, options }) {
 
 function StatCard({ label, value, sub, accent, loading }) {
   return (
-    <div style={{ background: "#111", border: "1px solid #1E1E1E", borderRadius: 8, padding: "22px 26px", flex: 1, minWidth: 0 }}>
-      <div style={{ color: "#9a9a9a", fontSize: 13, letterSpacing: "0.12em", textTransform: "uppercase", ...M, marginBottom: 8 }}>{label}</div>
+    <div style={{ background: "#121820", border: "1px solid #2A3440", borderRadius: 8, padding: "22px 26px", flex: 1, minWidth: 0 }}>
+      <div style={{ color: "#B0BAC5", fontSize: 13, letterSpacing: "0.12em", textTransform: "uppercase", ...M, marginBottom: 8 }}>{label}</div>
       <div style={{ color: accent || "#F0ECE3", fontSize: 24, fontWeight: 700, ...M, letterSpacing: "-0.02em" }}>
-        {loading ? <span style={{ color: "#9a9a9a" }}>···</span> : value}
+        {loading ? <span style={{ color: "#B0BAC5" }}>···</span> : value}
       </div>
       {sub && <div style={{ color: "#c0c0c0", fontSize: 13, marginTop: 4, ...M }}>{sub}</div>}
     </div>
@@ -277,7 +277,7 @@ function StatCard({ label, value, sub, accent, loading }) {
 
 function Loader({ msg }) {
   return (
-    <div style={{ textAlign: "center", padding: "60px 0", color: "#9a9a9a", ...M, fontSize: 14, letterSpacing: "0.1em" }}>
+    <div style={{ textAlign: "center", padding: "60px 0", color: "#B0BAC5", ...M, fontSize: 14, letterSpacing: "0.1em" }}>
       <div style={{ marginBottom: 12, fontSize: 24 }}>⟳</div>
       {msg || "LOADING…"}
     </div>
@@ -285,8 +285,8 @@ function Loader({ msg }) {
 }
 
 function SupplyAllocationPie({ totalsByGroup }) {
-  const size = 190;
-  const r = 74;
+  const size = 260;
+  const r = 105;
   const cx = size / 2;
   const cy = size / 2;
 
@@ -315,7 +315,7 @@ function SupplyAllocationPie({ totalsByGroup }) {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 240 }}>
         {totalsByGroup.map((s) => (
-          <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 10, color: "#cfcfcf", fontSize: 13 }}>
+          <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 10, color: "#cfcfcf", fontSize: 16 }}>
             <span style={{ width: 10, height: 10, borderRadius: 999, background: s.color, display: "inline-block" }} />
             <span style={{ flex: 1, opacity: 0.95 }}>{s.label}</span>
             <span style={{ opacity: 0.85 }}>{s.pct.toFixed(1)}%</span>
@@ -332,12 +332,12 @@ function MexcSection({ ticker, loading, error, onRefresh, ts }) {
   const pctColor = pctChange > 0 ? "#7CC4A4" : pctChange < 0 ? "#E07B5A" : "#555";
 
   return (
-    <div style={{ background: "#0F0F0F", border: "1px solid #1E1E1E", borderRadius: 8, overflow: "hidden", marginBottom: 16 }}>
+    <div style={{ background: "#0F0F0F", border: "1px solid #2A3440", borderRadius: 8, overflow: "hidden", marginBottom: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", borderBottom: "1px solid #1A1A1A" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 6, height: 6, borderRadius: "50%", background: loading ? "#333" : error ? "#E07B5A" : "#7CC4A4" }} />
           <span style={{ ...M, fontSize: 14, fontWeight: 700, letterSpacing: "0.08em", color: "#CCC" }}>MEXC · {MEXC_SYMBOL}</span>
-          <span style={{ ...M, fontSize: 12, color: "#9a9a9a" }}>CENTRALISED EXCHANGE</span>
+          <span style={{ ...M, fontSize: 12, color: "#B0BAC5" }}>CENTRALISED EXCHANGE</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {ts && <span style={{ ...M, fontSize: 12, color: "#2E2E2E" }}>{ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}
@@ -346,7 +346,7 @@ function MexcSection({ ticker, loading, error, onRefresh, ts }) {
       </div>
 
       {loading ? (
-        <div style={{ padding: "30px 20px", textAlign: "center", color: "#9a9a9a", ...M, fontSize: 14 }}>FETCHING MEXC DATA…</div>
+        <div style={{ padding: "30px 20px", textAlign: "center", color: "#B0BAC5", ...M, fontSize: 14 }}>FETCHING MEXC DATA…</div>
       ) : error ? (
         <div style={{ padding: "30px 20px", textAlign: "center", color: "#E07B5A", ...M, fontSize: 14 }}>MEXC API unavailable — {error}</div>
       ) : ticker ? (
@@ -378,12 +378,12 @@ function MexcSection({ ticker, loading, error, onRefresh, ts }) {
             <div style={{ background: "#0D1A12", border: "1px solid #1A2E1A", borderRadius: 6, padding: "10px 14px" }}>
               <div style={{ ...M, fontSize: 11, color: "#444", letterSpacing: "0.1em", marginBottom: 5 }}>BID</div>
               <div style={{ ...M, fontSize: 14, fontWeight: 700, color: "#7CC4A4" }}>${parseFloat(ticker.bidPrice).toFixed(6)}</div>
-              <div style={{ ...M, fontSize: 12, color: "#3A3A3A", marginTop: 3 }}>{fmtTokens(parseFloat(ticker.bidQty))} AUKI</div>
+              <div style={{ ...M, fontSize: 12, color: "#9AA4AF", marginTop: 3 }}>{fmtTokens(parseFloat(ticker.bidQty))} AUKI</div>
             </div>
             <div style={{ background: "#1A0D0D", border: "1px solid #2E1A1A", borderRadius: 6, padding: "10px 14px" }}>
               <div style={{ ...M, fontSize: 11, color: "#444", letterSpacing: "0.1em", marginBottom: 5 }}>ASK</div>
               <div style={{ ...M, fontSize: 14, fontWeight: 700, color: "#E07B5A" }}>${parseFloat(ticker.askPrice).toFixed(6)}</div>
-              <div style={{ ...M, fontSize: 12, color: "#3A3A3A", marginTop: 3 }}>{fmtTokens(parseFloat(ticker.askQty))} AUKI</div>
+              <div style={{ ...M, fontSize: 12, color: "#9AA4AF", marginTop: 3 }}>{fmtTokens(parseFloat(ticker.askQty))} AUKI</div>
             </div>
           </div>
 
@@ -401,26 +401,26 @@ function MexcSection({ ticker, loading, error, onRefresh, ts }) {
 
 function MexcTradesPanel({ trades, loading, error, ts }) {
   return (
-    <div style={{ background: "#0F0F0F", border: "1px solid #1E1E1E", borderRadius: 8, overflow: "hidden" }}>
+    <div style={{ background: "#0F0F0F", border: "1px solid #2A3440", borderRadius: 8, overflow: "hidden" }}>
       <div style={{ padding: "12px 20px", borderBottom: "1px solid #1A1A1A", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <div style={{ fontSize: 12, color: "#9a9a9a", letterSpacing: "0.1em", ...M }}>RECENT MEXC TRADES · AUTO REFRESH 30S</div>
-        <div style={{ fontSize: 12, color: "#3A3A3A", ...M }}>{ts ? ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</div>
+        <div style={{ fontSize: 12, color: "#B0BAC5", letterSpacing: "0.1em", ...M }}>RECENT MEXC TRADES · AUTO REFRESH 30S</div>
+        <div style={{ fontSize: 12, color: "#9AA4AF", ...M }}>{ts ? ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "70px 80px 80px 90px 110px 80px", gap: 12, padding: "14px 20px", borderBottom: "1px solid #1A1A1A" }}>
         {["ICON", "TIME", "TYPE", "PRICE", "AUKI", "USD"].map((h) => (
-          <div key={h} style={{ fontSize: 11, color: "#9a9a9a", letterSpacing: "0.1em", ...M }}>
+          <div key={h} style={{ fontSize: 11, color: "#B0BAC5", letterSpacing: "0.1em", ...M }}>
             {h}
           </div>
         ))}
       </div>
 
       {loading ? (
-        <div style={{ padding: "30px 20px", textAlign: "center", color: "#9a9a9a", ...M, fontSize: 14 }}>FETCHING RECENT MEXC TRADES…</div>
+        <div style={{ padding: "30px 20px", textAlign: "center", color: "#B0BAC5", ...M, fontSize: 14 }}>FETCHING RECENT MEXC TRADES…</div>
       ) : error ? (
         <div style={{ padding: "30px 20px", textAlign: "center", color: "#E07B5A", ...M, fontSize: 14 }}>MEXC trades unavailable — {error}</div>
       ) : trades.length === 0 ? (
-        <div style={{ padding: "30px 20px", textAlign: "center", color: "#9a9a9a", ...M, fontSize: 14 }}>No recent trades</div>
+        <div style={{ padding: "30px 20px", textAlign: "center", color: "#B0BAC5", ...M, fontSize: 14 }}>No recent trades</div>
       ) : (
         trades.map((t, i) => {
           const sell = !!t.isBuyerMaker;
@@ -449,7 +449,7 @@ function MexcTradesPanel({ trades, loading, error, ts }) {
         })
       )}
 
-      <div style={{ padding: "10px 20px", borderTop: "1px solid #1A1A1A", color: "#3A3A3A", fontSize: 12, ...M }}>
+      <div style={{ padding: "10px 20px", borderTop: "1px solid #1A1A1A", color: "#9AA4AF", fontSize: 12, ...M }}>
         🍤 under $100 · 🐟 $100–$999 · 🐋 $1,000+
       </div>
     </div>
@@ -465,7 +465,7 @@ function VaultBalancesTab({ balances, mode, price }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 140px 80px", gap: 12, padding: "0 20px 6px 36px" }}>
         {["VAULT", "BALANCE", "% SUPPLY"].map((h, i) => (
-          <div key={h} style={{ fontSize: 11, color: "#9a9a9a", letterSpacing: "0.1em", ...M, textAlign: i === 0 ? "left" : "right" }}>
+          <div key={h} style={{ fontSize: 11, color: "#B0BAC5", letterSpacing: "0.1em", ...M, textAlign: i === 0 ? "left" : "right" }}>
             {h}
           </div>
         ))}
@@ -479,7 +479,7 @@ function VaultBalancesTab({ balances, mode, price }) {
         const isExp = !!expanded[g.id];
 
         return (
-          <div key={g.id} style={{ background: "#0F0F0F", border: "1px solid #1E1E1E", borderRadius: 8, overflow: "hidden" }}>
+          <div key={g.id} style={{ background: "#0F0F0F", border: "1px solid #2A3440", borderRadius: 8, overflow: "hidden" }}>
             <div
               onClick={() => setExpanded((p) => ({ ...p, [g.id]: !p[g.id] }))}
               style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", cursor: "pointer", userSelect: "none", borderBottom: isExp ? "1px solid #1A1A1A" : "none" }}
@@ -496,7 +496,7 @@ function VaultBalancesTab({ balances, mode, price }) {
               <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
                 <div style={{ textAlign: "right" }}>
                   <div style={{ color: "#F0ECE3", ...M, fontSize: 19, fontWeight: 700 }}>{disp(gTotal)}</div>
-                  <div style={{ color: "#3A3A3A", ...M, fontSize: 13 }}>{pct}% of supply</div>
+                  <div style={{ color: "#9AA4AF", ...M, fontSize: 13 }}>{pct}% of supply</div>
                 </div>
                 <span style={{ color: "#2E2E2E", fontSize: 12 }}>{isExp ? "▲" : "▼"}</span>
               </div>
@@ -522,7 +522,7 @@ function VaultBalancesTab({ balances, mode, price }) {
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <div style={{ width: 1, height: 13, background: "#252525" }} />
-                      <span style={{ color: empty ? "#3A3A3A" : "#888", ...M, fontSize: 14 }}>{v.name}</span>
+                      <span style={{ color: empty ? "#9AA4AF" : "#888", ...M, fontSize: 14 }}>{v.name}</span>
                     </div>
                     <div style={{ color: empty ? "#2E2E2E" : "#CCC", ...M, fontSize: 15, fontWeight: 600, textAlign: "right" }}>{disp(v.balance)}</div>
                     <div style={{ color: "#2E2E2E", ...M, fontSize: 13, textAlign: "right" }}>{v.balance > 0 ? `${((v.balance / TOTAL_SUPPLY) * 100).toFixed(2)}%` : ""}</div>
@@ -563,7 +563,7 @@ function MovementLogTab({ movements, mode, price }) {
     <div>
       <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
         <PeriodToggle value={period} onChange={setPeriod} options={[{ v: "1d", l: "24H" }, { v: "7d", l: "7D" }, { v: "30d", l: "30D" }, { v: "90d", l: "90D" }, { v: "all", l: "ALL" }]} />
-        <select value={vaultFilter} onChange={(e) => setVaultFilter(e.target.value)} style={{ background: "#0D0D0D", border: "1px solid #1E1E1E", borderRadius: 6, color: "#888", ...M, fontSize: 13, padding: "5px 10px", cursor: "pointer" }}>
+        <select value={vaultFilter} onChange={(e) => setVaultFilter(e.target.value)} style={{ background: "#0D0D0D", border: "1px solid #2A3440", borderRadius: 6, color: "#888", ...M, fontSize: 13, padding: "5px 10px", cursor: "pointer" }}>
           <option value="all">All vaults</option>
           {vaultNames.map((n) => (
             <option key={n} value={n}>
@@ -574,17 +574,17 @@ function MovementLogTab({ movements, mode, price }) {
         <span style={{ marginLeft: "auto", color: "#2E2E2E", fontSize: 13, ...M }}>{filtered.length} transactions</span>
       </div>
 
-      <div style={{ background: "#0F0F0F", border: "1px solid #1E1E1E", borderRadius: 8, overflow: "hidden" }}>
+      <div style={{ background: "#0F0F0F", border: "1px solid #2A3440", borderRadius: 8, overflow: "hidden" }}>
         <div style={{ display: "grid", gridTemplateColumns: "150px 110px 1fr 1fr 130px", gap: 12, padding: "14px 20px", borderBottom: "1px solid #1A1A1A" }}>
           {["DATE", "TYPE", "FROM", "TO", "AMOUNT"].map((h) => (
-            <div key={h} style={{ fontSize: 11, color: "#9a9a9a", letterSpacing: "0.1em", ...M }}>
+            <div key={h} style={{ fontSize: 11, color: "#B0BAC5", letterSpacing: "0.1em", ...M }}>
               {h}
             </div>
           ))}
         </div>
 
         {filtered.length === 0 ? (
-          <div style={{ padding: "40px 20px", textAlign: "center", color: "#9a9a9a", ...M, fontSize: 14 }}>No movements in this period</div>
+          <div style={{ padding: "40px 20px", textAlign: "center", color: "#B0BAC5", ...M, fontSize: 14 }}>No movements in this period</div>
         ) : (
           filtered.map((m, i) => {
             const type = typeOf(m);
@@ -670,7 +670,7 @@ function DexMarketActivityTab({ daily, recentTrades }) {
 
   return (
     <div>
-      <div style={{ fontSize: 12, color: "#9a9a9a", letterSpacing: "0.12em", ...M, marginBottom: 10 }}>DECENTRALISED EXCHANGE (ON-CHAIN · BASE)</div>
+      <div style={{ fontSize: 12, color: "#B0BAC5", letterSpacing: "0.12em", ...M, marginBottom: 10 }}>DECENTRALISED EXCHANGE (ON-CHAIN · BASE)</div>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
         <PeriodToggle value={period} onChange={setPeriod} options={[{ v: "7d", l: "7D" }, { v: "30d", l: "30D" }, { v: "90d", l: "90D" }, { v: "1y", l: "1Y" }, { v: "all", l: "ALL" }]} />
@@ -685,7 +685,7 @@ function DexMarketActivityTab({ daily, recentTrades }) {
           { l: "BUY VOLUME", v: fmtTokens(totalBuyVol), a: "#7CC4A4" },
           { l: "SELL VOLUME", v: fmtTokens(totalSellVol), a: "#E07B5A" },
         ].map((c) => (
-          <div key={c.l} style={{ background: "#111", border: "1px solid #1E1E1E", borderRadius: 8, padding: "18px 20px" }}>
+          <div key={c.l} style={{ background: "#111", border: "1px solid #2A3440", borderRadius: 8, padding: "18px 20px" }}>
             <div style={{ color: "#444", fontSize: 12, letterSpacing: "0.12em", ...M, marginBottom: 6 }}>{c.l}</div>
             <div style={{ color: c.a, fontSize: 19, fontWeight: 700, ...M }}>{c.v}</div>
           </div>
@@ -693,8 +693,8 @@ function DexMarketActivityTab({ daily, recentTrades }) {
       </div>
 
       {chart.length > 1 && (
-        <div style={{ background: "#0F0F0F", border: "1px solid #1E1E1E", borderRadius: 8, padding: "16px 20px", marginBottom: 16 }}>
-          <div style={{ fontSize: 12, color: "#9a9a9a", letterSpacing: "0.1em", ...M, marginBottom: 12 }}>PRICE (AUKI / USD) — DAILY VWAP</div>
+        <div style={{ background: "#0F0F0F", border: "1px solid #2A3440", borderRadius: 8, padding: "16px 20px", marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: "#B0BAC5", letterSpacing: "0.1em", ...M, marginBottom: 12 }}>PRICE (AUKI / USD) — DAILY VWAP</div>
           <div style={{ position: "relative" }}>
             <svg width="100%" height={H} viewBox={`0 0 800 ${H}`} preserveAspectRatio="none" style={{ display: "block" }}>
               <defs>
@@ -731,8 +731,8 @@ function DexMarketActivityTab({ daily, recentTrades }) {
       )}
 
       {(totalBuyVol + totalSellVol) > 0 && (
-        <div style={{ background: "#0F0F0F", border: "1px solid #1E1E1E", borderRadius: 8, padding: "14px 20px", marginBottom: 16 }}>
-          <div style={{ fontSize: 12, color: "#9a9a9a", letterSpacing: "0.1em", ...M, marginBottom: 10 }}>BUY / SELL PRESSURE</div>
+        <div style={{ background: "#0F0F0F", border: "1px solid #2A3440", borderRadius: 8, padding: "14px 20px", marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: "#B0BAC5", letterSpacing: "0.1em", ...M, marginBottom: 10 }}>BUY / SELL PRESSURE</div>
           <div style={{ display: "flex", height: 6, borderRadius: 3, overflow: "hidden" }}>
             <div style={{ width: `${(totalBuyVol / (totalBuyVol + totalSellVol)) * 100}%`, background: "#7CC4A4" }} />
             <div style={{ flex: 1, background: "#E07B5A" }} />
@@ -744,10 +744,10 @@ function DexMarketActivityTab({ daily, recentTrades }) {
         </div>
       )}
 
-      <div style={{ background: "#0F0F0F", border: "1px solid #1E1E1E", borderRadius: 8, overflow: "hidden", marginBottom: 16 }}>
+      <div style={{ background: "#0F0F0F", border: "1px solid #2A3440", borderRadius: 8, overflow: "hidden", marginBottom: 16 }}>
         <div style={{ display: "grid", gridTemplateColumns: "120px 110px 110px 120px 120px 80px 120px", gap: 12, padding: "14px 20px", borderBottom: "1px solid #1A1A1A" }}>
           {["DATE", "LOW", "HIGH", "BUY VOL", "SELL VOL", "TRADES", "VOLUME (USD)"].map((h) => (
-            <div key={h} style={{ fontSize: 11, color: "#9a9a9a", letterSpacing: "0.1em", ...M }}>
+            <div key={h} style={{ fontSize: 11, color: "#B0BAC5", letterSpacing: "0.1em", ...M }}>
               {h}
             </div>
           ))}
@@ -771,11 +771,11 @@ function DexMarketActivityTab({ daily, recentTrades }) {
       </div>
 
       {filteredTrades.length > 0 && (
-        <div style={{ background: "#0F0F0F", border: "1px solid #1E1E1E", borderRadius: 8, overflow: "hidden" }}>
-          <div style={{ padding: "12px 20px", borderBottom: "1px solid #1A1A1A", fontSize: 12, color: "#9a9a9a", letterSpacing: "0.1em", ...M }}>RECENT INDIVIDUAL DEX TRADES</div>
+        <div style={{ background: "#0F0F0F", border: "1px solid #2A3440", borderRadius: 8, overflow: "hidden" }}>
+          <div style={{ padding: "12px 20px", borderBottom: "1px solid #1A1A1A", fontSize: 12, color: "#B0BAC5", letterSpacing: "0.1em", ...M }}>RECENT INDIVIDUAL DEX TRADES</div>
           <div style={{ display: "grid", gridTemplateColumns: "70px 150px 70px 140px 120px 110px", gap: 12, padding: "14px 20px", borderBottom: "1px solid #1A1A1A" }}>
             {["ICON", "DATE", "TYPE", "AUKI AMOUNT", "USD VALUE", "PRICE / AUKI"].map((h) => (
-              <div key={h} style={{ fontSize: 11, color: "#9a9a9a", letterSpacing: "0.1em", ...M }}>
+              <div key={h} style={{ fontSize: 11, color: "#B0BAC5", letterSpacing: "0.1em", ...M }}>
                 {h}
               </div>
             ))}
@@ -814,22 +814,22 @@ function CexMarketActivityTab({ ticker, tickerLoading, tickerError, tickerRefres
 
   return (
     <div>
-      <div style={{ fontSize: 12, color: "#9a9a9a", letterSpacing: "0.12em", ...M, marginBottom: 10 }}>CENTRALISED EXCHANGE</div>
+      <div style={{ fontSize: 12, color: "#B0BAC5", letterSpacing: "0.12em", ...M, marginBottom: 10 }}>CENTRALISED EXCHANGE</div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 16 }}>
-        <div style={{ background: "#111", border: "1px solid #1E1E1E", borderRadius: 8, padding: "18px 20px" }}>
+        <div style={{ background: "#111", border: "1px solid #2A3440", borderRadius: 8, padding: "18px 20px" }}>
           <div style={{ color: "#444", fontSize: 12, letterSpacing: "0.12em", ...M, marginBottom: 6 }}>24H PRICE CHANGE</div>
           <div style={{ color: priceChange24h == null ? "#F0ECE3" : priceChange24h >= 0 ? "#7CC4A4" : "#E07B5A", fontSize: 19, fontWeight: 700, ...M }}>
             {priceChange24h == null ? "—" : `${priceChange24h.toFixed(2)}%`}
           </div>
         </div>
 
-        <div style={{ background: "#111", border: "1px solid #1E1E1E", borderRadius: 8, padding: "18px 20px" }}>
+        <div style={{ background: "#111", border: "1px solid #2A3440", borderRadius: 8, padding: "18px 20px" }}>
           <div style={{ color: "#444", fontSize: 12, letterSpacing: "0.12em", ...M, marginBottom: 6 }}>24H VOLUME (USDT)</div>
           <div style={{ color: "#F0ECE3", fontSize: 19, fontWeight: 700, ...M }}>{fmtUsd(cexVol24hUsd)}</div>
         </div>
 
-        <div style={{ background: "#111", border: "1px solid #1E1E1E", borderRadius: 8, padding: "18px 20px" }}>
+        <div style={{ background: "#111", border: "1px solid #2A3440", borderRadius: 8, padding: "18px 20px" }}>
           <div style={{ color: "#444", fontSize: 12, letterSpacing: "0.12em", ...M, marginBottom: 6 }}>MARKET</div>
           <div style={{ color: "#C8A96E", fontSize: 19, fontWeight: 700, ...M }}>{MEXC_SYMBOL}</div>
         </div>
@@ -841,7 +841,7 @@ function CexMarketActivityTab({ ticker, tickerLoading, tickerError, tickerRefres
 
 {daily && daily.length > 0 && (
   <div style={{ marginTop:18, marginBottom:18 }}>
-    <div style={{ fontSize:12, color:"#9a9a9a", letterSpacing:"0.12em", marginBottom:10 }}>
+    <div style={{ fontSize:12, color:"#B0BAC5", letterSpacing:"0.12em", marginBottom:10 }}>
       CEX DAILY SUMMARY (MEXC)
     </div>
 
@@ -853,7 +853,7 @@ function CexMarketActivityTab({ ticker, tickerLoading, tickerError, tickerRefres
       borderBottom:"1px solid #1A1A1A"
     }}>
       {["DATE","LOW","HIGH","CLOSE","VOLUME (USD)"].map(h=>(
-        <div key={h} style={{ fontSize:11, color:"#9a9a9a", letterSpacing:"0.1em", ...M }}>{h}</div>
+        <div key={h} style={{ fontSize:11, color:"#B0BAC5", letterSpacing:"0.1em", ...M }}>{h}</div>
       ))}
     </div>
 
@@ -916,7 +916,7 @@ function LoginScreen({ onAuth }) {
 
   return (
     <div style={{ minHeight: "100vh", background: "#080808", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'JetBrains Mono',monospace" }}>
-      <div style={{ width: 320, padding: "40px 36px", background: "#111", border: "1px solid #1E1E1E", borderRadius: 12 }}>
+      <div style={{ width: 320, padding: "40px 36px", background: "#111", border: "1px solid #2A3440", borderRadius: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 32 }}>
           <div style={{ width: 28, height: 28, borderRadius: 6, background: "#C8A96E", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <span style={{ color: "#0D0D0D", fontSize: 19, fontWeight: 900 }}>A</span>
@@ -1135,7 +1135,7 @@ export default function AukiTreasury() {
   if (!authed) return <LoginScreen onAuth={() => setAuthed(true)} />;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#080808", color: "#F0ECE3", ...M }}>
+    <div style={{ minHeight: "100vh", background: "#0B0F14", color: "#F0ECE3", ...M }}>
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}} *{box-sizing:border-box}`}</style>
 
       <div style={{ borderBottom: "1px solid #161616", padding: "13px 32px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, background: "#080808", zIndex: 10 }}>
@@ -1149,7 +1149,7 @@ export default function AukiTreasury() {
           <span style={{ color: "#222" }}>|</span>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#7CC4A4", animation: "pulse 2s infinite" }} />
-            <span style={{ fontSize: 13, color: "#3A3A3A", letterSpacing: "0.08em" }}>LIVE · BASE BLOCKCHAIN</span>
+            <span style={{ fontSize: 13, color: "#9AA4AF", letterSpacing: "0.08em" }}>LIVE · BASE BLOCKCHAIN</span>
           </div>
         </div>
 
@@ -1160,13 +1160,13 @@ export default function AukiTreasury() {
             <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
               {priceState === "est" && <span style={{ color: "#FF6B6B", fontSize: 12, ...M }}>EST</span>}
               <span style={{ fontSize: 15, color: "#C8A96E", fontWeight: 700, ...M }}>${price?.toFixed(5)}</span>
-              {priceTs && <span style={{ color: "#2E2E2E", fontSize: 12, ...M }}>{priceTs.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}
+              {priceTs && <span style={{ color: "#9FB0C3", fontSize: 12, ...M }}>{priceTs.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}
               <button onClick={doFetchPrice} title="Refresh price" style={{ background: "none", border: "1px solid #222", borderRadius: 4, color: "#444", fontSize: 12, padding: "2px 6px", cursor: "pointer", ...M }}>↻</button>
             </div>
           )}
 
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ color: "#9a9a9a", fontSize: 12, ...M }}>
+            <div style={{ color: "#B0BAC5", fontSize: 12, ...M }}>
               LAST UPDATED: {lastRefresh ? lastRefresh.toLocaleString("en-GB") : "—"}
             </div>
 
@@ -1191,8 +1191,18 @@ export default function AukiTreasury() {
         </div>
       </div>
 
-      <div style={{ padding: "26px 32px", maxWidth: 1400, margin: "0 auto" }}>
-        <div style={{ display: "flex", gap: 10, marginBottom: 22, flexWrap: "wrap" }}>
+      <div style={{
+        width: "100%",
+        maxWidth: "1700px",
+        margin: "0 auto",
+        padding: "26px 40px"
+      }}>
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(5, 1fr)",
+          gap: 12,
+          marginBottom: 22
+        }}>
           <StatCard label="Total Supply" value="10.000B" sub="Max supply · minted Aug 2024" loading={false} />
           <StatCard label="Held in Vaults" value={mode === "tokens" ? fmtTokens(totalHeld) : fmtUsd(totalHeld * dp)} sub={`${((totalHeld / TOTAL_SUPPLY) * 100).toFixed(2)}% · ${activeCount} active vaults`} accent="#C8A96E" loading={loading.balances} />
           <StatCard label="24H DEX Volume" value={fmtUsd(dexVol24hUsd)} sub={`${trades24h.length} on-chain trades`} loading={loading.trades} />
@@ -1205,9 +1215,52 @@ export default function AukiTreasury() {
           />
         </div>
 
-        <div style={{ background: "#111", border: "1px solid #1E1E1E", borderRadius: 12, padding: "18px 22px", marginBottom: 18 }}>
-          <div style={{ fontSize: 12, color: "#9a9a9a", letterSpacing: "0.1em", marginBottom: 10 }}>AUKI SUPPLY ALLOCATION</div>
-          <SupplyAllocationPie totalsByGroup={supplyPieData} />
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 16,
+          marginBottom: 18
+        }}>
+
+          <div style={{ background: "#111", border: "1px solid #2A3440", borderRadius: 12, padding: "18px 22px" }}>
+            <div style={{ fontSize: 16, color: "#B0BAC5", letterSpacing: "0.1em", marginBottom: 10 }}>
+              AUKI SUPPLY ALLOCATION
+            </div>
+            <SupplyAllocationPie totalsByGroup={supplyPieData} />
+          </div>
+
+<div style={{ background: "#111", border: "1px solid #2A3440", borderRadius: 12, padding: "18px 22px" }}>
+  <div style={{ fontSize: 16, color: "#B0BAC5", letterSpacing: "0.1em", marginBottom: 14 }}>
+    MARKET SNAPSHOT
+  </div>
+
+  <div style={{ display: "flex", flexDirection: "column", gap: 12, ...M }}>
+
+    <div style={{ display:"flex", justifyContent:"space-between" }}>
+      <span style={{ color:"#9AA4AF" }}>DEX SHARE</span>
+      <span style={{ color:"#7CC4A4", fontWeight:600 }}>
+        {((dexVol24hUsd / (dexVol24hUsd + mexcVol24hUsd)) * 100).toFixed(1)}%
+      </span>
+    </div>
+
+    <div style={{ display:"flex", justifyContent:"space-between" }}>
+      <span style={{ color:"#9AA4AF" }}>CEX SHARE</span>
+      <span style={{ color:"#C8A96E", fontWeight:600 }}>
+        {((mexcVol24hUsd / (dexVol24hUsd + mexcVol24hUsd)) * 100).toFixed(1)}%
+      </span>
+    </div>
+
+    <div style={{ borderTop:"1px solid #1E1E1E", margin:"6px 0" }} />
+
+    <div style={{ display:"flex", justifyContent:"space-between" }}>
+      <span style={{ color:"#9AA4AF" }}>24H TOTAL VOLUME</span>
+      <span style={{ color:"#F0ECE3", fontWeight:600 }}>
+        {fmtUsd(dexVol24hUsd + mexcVol24hUsd)}
+      </span>
+    </div>
+
+  </div>
+</div>
         </div>
 
         <div style={{ display: "flex", marginBottom: 16, borderBottom: "1px solid #161616" }}>
@@ -1224,7 +1277,7 @@ export default function AukiTreasury() {
                 background: "none",
                 border: "none",
                 borderBottom: activeTab === id ? "2px solid #C8A96E" : "2px solid transparent",
-                color: activeTab === id ? "#C8A96E" : "#3A3A3A",
+                color: activeTab === id ? "#C8A96E" : "#9AA4AF",
                 ...M,
                 fontSize: 13,
                 fontWeight: 700,

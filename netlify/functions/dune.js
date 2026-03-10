@@ -4,7 +4,7 @@ export async function handler(event) {
   const auth = requireBasicAuth(event);
   if (!auth.ok) return auth.response;
 
-  const apiKey = process.env.DUNE_API_KEY || "";
+  const apiKey = process.env.Dune_Secret_API || "";
   if (!apiKey) {
     return {
       statusCode: 500,

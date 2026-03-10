@@ -773,7 +773,7 @@ function DexMarketActivityTab({ daily, recentTrades }) {
       {filteredTrades.length > 0 && (
         <div style={{ background: "#0F0F0F", border: "1px solid #1E1E1E", borderRadius: 8, overflow: "hidden" }}>
           <div style={{ padding: "12px 20px", borderBottom: "1px solid #1A1A1A", fontSize: 12, color: "#9a9a9a", letterSpacing: "0.1em", ...M }}>RECENT INDIVIDUAL DEX TRADES</div>
-          <div style={{ display: "grid", gridTemplateColumns: "150px 70px 140px 120px 110px", gap: 12, padding: "14px 20px", borderBottom: "1px solid #1A1A1A" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "70px 150px 70px 140px 120px 110px", gap: 12, padding: "14px 20px", borderBottom: "1px solid #1A1A1A" }}>
             {["ICON", "DATE", "TYPE", "AUKI AMOUNT", "USD VALUE", "PRICE / AUKI"].map((h) => (
               <div key={h} style={{ fontSize: 11, color: "#9a9a9a", letterSpacing: "0.1em", ...M }}>
                 {h}

@@ -189,23 +189,23 @@ async function fetchMexcRecentTrades(limit = 50) {
     if (Array.isArray(j)) return { data: j, error: null };
   } catch {}
 
-async function fetchMexcDaily(limit = 365) {
-  try {
-    const r = await fetch(`/.netlify/functions/mexc?daily=1&limit=${limit}`);
-    const j = await r.json();
-    if (Array.isArray(j)) return { data: j, error: null };
-    return { data: [], error: "No daily CEX data" };
-  } catch (e) {
-    return { data: [], error: e.message };
-  }
-}
-
   // 2) Fallback: direct
   try {
     const res = await fetch(`https://api.mexc.com/api/v3/trades?symbol=${MEXC_SYMBOL}&limit=${limit}`);
     const data = await res.json();
     if (Array.isArray(data)) return { data, error: null };
     return { data: [], error: "No trade data" };
+  } catch (e) {
+    return { data: [], error: e.message };
+  }
+}
+
+async function fetchMexcDaily(limit = 365) {
+  try {
+    const r = await fetch(`/.netlify/functions/mexc?daily=1&limit=${limit}`);
+    const j = await r.json();
+    if (Array.isArray(j)) return { data: j, error: null };
+    return { data: [], error: "No daily CEX data" };
   } catch (e) {
     return { data: [], error: e.message };
   }

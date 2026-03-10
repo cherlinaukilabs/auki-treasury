@@ -10,6 +10,37 @@ export async function handler(event) {
 
   try {
 
+// ─── DAILY SUMMARY (CEX) ─────────────────────────
+if (params.daily) {
+
+  const limit = params.limit || 365;
+
+  const res = await fetch(
+    `https://api.mexc.com/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=1d&limit=${limit}`
+  );
+
+  const raw = await res.json();
+
+  const data = raw.map(k => ({
+    day: new Date(k[0]).toISOString(),
+    open: parseFloat(k[1]),
+    high: parseFloat(k[2]),
+    low: parseFloat(k[3]),
+    close: parseFloat(k[4]),
+    volume_auki: parseFloat(k[5]),
+    volume_usd: parseFloat(k[7])
+  }));
+
+  return {
+    statusCode: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "public, max-age=300"
+    },
+    body: JSON.stringify(data)
+  };
+}
+
     // ─── RECENT TRADES ENDPOINT ─────────────────────
     if (params.recentTrades) {
 

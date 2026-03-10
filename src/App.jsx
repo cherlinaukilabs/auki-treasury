@@ -189,6 +189,17 @@ async function fetchMexcRecentTrades(limit = 50) {
     if (Array.isArray(j)) return { data: j, error: null };
   } catch {}
 
+async function fetchMexcDaily(limit = 365) {
+  try {
+    const r = await fetch(`/.netlify/functions/mexc?daily=1&limit=${limit}`);
+    const j = await r.json();
+    if (Array.isArray(j)) return { data: j, error: null };
+    return { data: [], error: "No daily CEX data" };
+  } catch (e) {
+    return { data: [], error: e.message };
+  }
+}
+
   // 2) Fallback: direct
   try {
     const res = await fetch(`https://api.mexc.com/api/v3/trades?symbol=${MEXC_SYMBOL}&limit=${limit}`);
@@ -799,7 +810,7 @@ function DexMarketActivityTab({ daily, recentTrades }) {
 }
 
 // ─── CEX Market Activity ──────────────────────────────────────────────────────
-function CexMarketActivityTab({ ticker, tickerLoading, tickerError, tickerRefresh, tickerTs, recentTrades, tradesLoading, tradesError, tradesTs }) {
+function CexMarketActivityTab({ ticker, tickerLoading, tickerError, tickerRefresh, tickerTs, recentTrades, tradesLoading, tradesError, tradesTs, daily, dailyLoading, dailyError }) {
   const priceChange24h = ticker?.priceChangePercent != null ? parseFloat(ticker.priceChangePercent) * 100 : null;
   const cexVol24hUsd = ticker?.quoteVolume ? parseFloat(ticker.quoteVolume) : 0;
 
@@ -827,6 +838,50 @@ function CexMarketActivityTab({ ticker, tickerLoading, tickerError, tickerRefres
       </div>
 
       <MexcSection ticker={ticker} loading={tickerLoading} error={tickerError} onRefresh={tickerRefresh} ts={tickerTs} />
+
+{/* CEX DAILY SUMMARY */}
+
+{daily && daily.length > 0 && (
+  <div style={{ marginTop:18, marginBottom:18 }}>
+    <div style={{ fontSize:12, color:"#9a9a9a", letterSpacing:"0.12em", marginBottom:10 }}>
+      CEX DAILY SUMMARY (MEXC)
+    </div>
+
+    <div style={{
+      display:"grid",
+      gridTemplateColumns:"120px 110px 110px 120px 140px",
+      gap:12,
+      padding:"14px 20px",
+      borderBottom:"1px solid #1A1A1A"
+    }}>
+      {["DATE","LOW","HIGH","CLOSE","VOLUME (USD)"].map(h=>(
+        <div key={h} style={{ fontSize:11, color:"#9a9a9a", letterSpacing:"0.1em", ...M }}>{h}</div>
+      ))}
+    </div>
+
+    {daily.slice(-100).reverse().map((d,i)=>(
+      <div key={i}
+        style={{
+          display:"grid",
+          gridTemplateColumns:"120px 110px 110px 120px 140px",
+          gap:12,
+          padding:"12px 20px",
+          borderBottom:"1px solid #141414",
+          ...M,
+          fontSize:14
+        }}
+      >
+        <div style={{ color:"#c0c0c0" }}>{fmtDateShort(d.day)}</div>
+        <div style={{ color:"#E07B5A" }}>{fmtPrice(d.low)}</div>
+        <div style={{ color:"#7CC4A4" }}>{fmtPrice(d.high)}</div>
+        <div style={{ color:"#F0ECE3" }}>{fmtPrice(d.close)}</div>
+        <div style={{ color:"#C8A96E" }}>{fmtUsd(d.volume_usd)}</div>
+      </div>
+    ))}
+  </div>
+)}
+
+<MexcTradesPanel trades={recentTrades} loading={tradesLoading} error={tradesError} ts={tradesTs} />
       <MexcTradesPanel trades={recentTrades} loading={tradesLoading} error={tradesError} ts={tradesTs} />
     </div>
   );
@@ -913,6 +968,10 @@ export default function AukiTreasury() {
   const [daily, setDaily] = useState([]);
 
   const [mexcTicker, setMexcTicker] = useState(null);
+  const [mexcDaily, setMexcDaily] = useState([]);
+  const [mexcDailyTs, setMexcDailyTs] = useState(null);
+  const [mexcDailyError, setMexcDailyError] = useState("");
+  const [mexcDailyLoading, setMexcDailyLoading] = useState(true); 
   const [mexcTs, setMexcTs] = useState(null);
   const [mexcError, setMexcError] = useState("");
 
@@ -971,6 +1030,20 @@ export default function AukiTreasury() {
     doFetchPrice();
     doFetchMexc();
     doFetchMexcRecentTrades();
+
+    setMexcDailyLoading(true);
+
+    fetchMexcDaily().then(result => {
+      if (result.data) {
+        setMexcDaily(result.data);
+        setMexcDailyTs(new Date());
+        setMexcDailyError("");
+      } else {
+        setMexcDaily([]);
+        setMexcDailyError(result.error || "CEX daily fetch failed");
+      }
+      setMexcDailyLoading(false);
+    });
 
     fetchDune(QUERY_BALANCES)
       .then((rows) => {
@@ -1182,6 +1255,9 @@ export default function AukiTreasury() {
             tradesLoading={loading.mexcTrades}
             tradesError={mexcRecentTradesError}
             tradesTs={mexcRecentTradesTs}
+            daily={mexcDaily}
+            dailyLoading={mexcDailyLoading}
+            dailyError={mexcDailyError}
           />
         )}
       </div>

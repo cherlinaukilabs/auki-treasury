@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-const DUNE_API_KEY = "V3EIDyaxRvgAbSse9AtoPFdEin6hnuYw";
 const QUERY_BALANCES = 6752291;
 const QUERY_MOVEMENTS = 6752302;
 const QUERY_TRADES = 6752309;
@@ -141,11 +140,9 @@ const getTradeSizeIcon = (usd) => {
 // ─── Data fetchers ────────────────────────────────────────────────────────────
 async function fetchDune(queryId) {
   try {
-    const res = await fetch(`https://api.dune.com/api/v1/query/${queryId}/results?limit=50000`, {
-      headers: { "x-dune-api-key": DUNE_API_KEY },
-    });
+    const res = await fetch(`/.netlify/functions/dune?queryId=${queryId}`);
     const data = await res.json();
-    return data?.result?.rows || [];
+    return data?.rows || [];
   } catch (e) {
     console.error("Dune fetch error:", e);
     return [];

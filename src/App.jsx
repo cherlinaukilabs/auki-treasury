@@ -1358,9 +1358,9 @@ function MonteCarloTab({ price: livePrice }) {
     return bars;
   }, [months]);
 
-  const outlookColor = summary.outlook === "optimistic" ? MC.green : summary.outlook === "cautious" ? MC.red : MC.gold;
-
   if (!sims || !summary) return <Loader msg="RUNNING SIMULATION…" />;
+
+  const outlookColor = summary.outlook === "optimistic" ? MC.green : summary.outlook === "cautious" ? MC.red : MC.gold;
 
   return (
     <div>

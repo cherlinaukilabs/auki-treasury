@@ -1335,6 +1335,7 @@ function MonteCarloTab({ price: livePrice }) {
 
   // Deflation timeline
   const deflationTimeline = useMemo(() => {
+    if (!sims) return [];
     return [9e9, 8e9, 7.5e9, 7e9, 6e9, 5.5e9, 5e9].map((target) => {
       const arr = sims.map((s) => { const i = s.findIndex((d) => d.totalSupply <= target); return i >= 0 ? i : Infinity; }).sort((a, b) => a - b);
       const med = arr[Math.floor(arr.length / 2)];

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const QUERY_BALANCES = 6752291;
@@ -591,7 +591,7 @@ function MovementLogTab({ movements, mode, price }) {
             const color = TC[type];
             return (
               <div
-                key={i}
+                key={`${m.block_time}-${m.from}-${m.to}`}
                 style={{ display: "grid", gridTemplateColumns: "150px 110px 1fr 1fr 130px", gap: 12, padding: "14px 20px", borderBottom: i < filtered.length - 1 ? "1px solid #141414" : "none", ...M, fontSize: 14 }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = "#131313")}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
@@ -785,7 +785,7 @@ function DexMarketActivityTab({ daily, recentTrades }) {
             const color = buy ? "#7CC4A4" : "#E07B5A";
             return (
               <div
-                key={i}
+                key={`${t.block_time}-${t.auki_amount}-${t.trade_type}`}
                 style={{ display: "grid", gridTemplateColumns: "70px 150px 70px 140px 120px 110px", gap: 12, padding: "12px 20px", borderBottom: i < Math.min(filteredTrades.length, 100) - 1 ? "1px solid #141414" : "none", ...M, fontSize: 14 }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = "#131313")}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
@@ -858,7 +858,7 @@ function CexMarketActivityTab({ ticker, tickerLoading, tickerError, tickerRefres
     </div>
 
     {daily.slice(-100).reverse().map((d,i)=>(
-      <div key={i}
+      <div key={d.day}
         style={{
           display:"grid",
           gridTemplateColumns:"120px 110px 110px 120px 140px",
@@ -880,20 +880,727 @@ function CexMarketActivityTab({ ticker, tickerLoading, tickerError, tickerRefres
 )}
 
 <MexcTradesPanel trades={recentTrades} loading={tradesLoading} error={tradesError} ts={tradesTs} />
-      <MexcTradesPanel trades={recentTrades} loading={tradesLoading} error={tradesError} ts={tradesTs} />
     </div>
   );
 }
 
-// ─── Password protection ──────────────────────────────────────────────────────
-const PASS_HASH = "c31f17e44c846952aa7a6a97b78bdab5739192a2a5c1baff95d24f7c95cdea7b";
+// ─── Monte Carlo Simulation ──────────────────────────────────────────────────
+// 10 variables chosen by the AUKI team:
+// 1. CEX Coverage Score (1–10)         — exchange reach, institutional access
+// 2. DEX Daily Volume ($)              — organic on-chain trading baseline
+// 3. Liquidity Depth ($)               — USD within ±2% of mid-price
+// 4. Network Economic Activity ($)     — real ecosystem value → burn driver
+// 5. Unlock Sell Pressure (%)          — % of vested tokens sold immediately
+// 6. Network Usage Growth (%/mo)       — adoption / utility expansion
+// 7. Active Wallet Growth (%/mo)       — ecosystem expansion proxy
+// 8. Buy/Sell Imbalance (ratio)        — >1 = net accumulation, <1 = distribution
+// 9. BTC Correlation (0–1)             — broader crypto market beta
+// 10. 30-Day Volatility (%)            — rolling price uncertainty
 
-async function hashPassword(pw) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pw));
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+const MC_DEFLATION_FLOOR = 5_000_000_000;
+const MC_TGE_DATE = new Date("2024-08-28");
+
+const MC_ALLOCATIONS = [
+  { name: "Seed & Pre-Seed", tokens: 460_000_000, vestMonths: 48, cliffMonths: 0 },
+  { name: "Early Bird", tokens: 438_000_000, vestMonths: 36, cliffMonths: 0 },
+  { name: "Pre-sale 1", tokens: 818_000_000, vestMonths: 36, cliffMonths: 0 },
+  { name: "Pre-sale 2", tokens: 273_000_000, vestMonths: 24, cliffMonths: 0 },
+  { name: "KOL Pre-sale", tokens: 34_000_000, vestMonths: 12, cliffMonths: 0 },
+  { name: "Community Pre-sale", tokens: 15_000_000, vestMonths: 12, cliffMonths: 0 },
+  { name: "Advisors", tokens: 230_000_000, vestMonths: 24, cliffMonths: 0 },
+  { name: "Accelerator", tokens: 600_000_000, vestMonths: 42, cliffMonths: 6 },
+  { name: "Team", tokens: 1_558_000_000, vestMonths: 42, cliffMonths: 6 },
+  { name: "Token Infrastructure", tokens: 700_000_000, vestMonths: 0, cliffMonths: 0 },
+  { name: "Ecosystem Rewards", tokens: 3_000_000_000, vestMonths: 36, cliffMonths: 0 },
+  { name: "Foundation", tokens: 1_874_000_000, vestMonths: 84, cliffMonths: 0 },
+];
+
+// ─── MC Design tokens ────────────────────────────────────────────────────────
+const MC = {
+  gold: "#C8A96E", green: "#7CC4A4", red: "#E07B5A", blue: "#7B9ECC",
+  purple: "#C47AB5", text: "#F0ECE3", dim: "#444", muted: "#9AA4AF",
+  veryDim: "#2E2E2E", subtle: "#B0BAC5", card: "#111", cardBorder: "#2A3440",
+  border: "#1A1A1A",
+};
+
+// ─── MC Formatters ────────────────────────────────────────────────────────────
+const mcFmtB = (n) => {
+  if (n == null || Number.isNaN(n)) return "—";
+  const x = Math.abs(Number(n)); const sign = n < 0 ? "-" : "";
+  if (x >= 1e9) return `${sign}${(x / 1e9).toFixed(2)}B`;
+  if (x >= 1e6) return `${sign}${(x / 1e6).toFixed(1)}M`;
+  if (x >= 1e3) return `${sign}${(x / 1e3).toFixed(0)}K`;
+  return `${sign}${x.toFixed(0)}`;
+};
+const mcFmtUsd = (n) => {
+  if (!n || Number(n) === 0) return "—";
+  const x = Math.abs(Number(n)); const sign = n < 0 ? "-" : "";
+  if (x >= 1e9) return `${sign}$${(x / 1e9).toFixed(2)}B`;
+  if (x >= 1e6) return `${sign}$${(x / 1e6).toFixed(2)}M`;
+  if (x >= 1e3) return `${sign}$${(x / 1e3).toFixed(1)}K`;
+  return `${sign}$${x.toFixed(2)}`;
+};
+const mcFmtPrice = (n) => (n ? `$${Number(n).toFixed(5)}` : "—");
+const mcFmtPct = (n) => (n != null ? `${Number(n).toFixed(1)}%` : "—");
+const mcFmtMo = (n) => {
+  const y = Math.floor(n / 12); const m = Math.round(n % 12);
+  if (y === 0) return `${m}mo`; if (m === 0) return `${y}y`; return `${y}y ${m}mo`;
+};
+
+// ─── PRNG ─────────────────────────────────────────────────────────────────────
+function mcMulberry32(seed) {
+  return function () {
+    let t = (seed += 0x6d2b79f5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
+function mcRandNormal(rng) {
+  let u, v, s;
+  do { u = rng() * 2 - 1; v = rng() * 2 - 1; s = u * u + v * v; } while (s >= 1 || s === 0);
+  return u * Math.sqrt((-2 * Math.log(s)) / s);
+}
+
+// ─── Vesting ──────────────────────────────────────────────────────────────────
+function mcGetVestedAtMonth(month) {
+  let total = 0;
+  for (const a of MC_ALLOCATIONS) {
+    if (a.vestMonths === 0) { total += a.tokens; continue; }
+    if (month < a.cliffMonths) continue;
+    total += (Math.min(month - a.cliffMonths, a.vestMonths) / a.vestMonths) * a.tokens;
+  }
+  return total;
+}
+function mcGetNewUnlocks(month) {
+  return mcGetVestedAtMonth(month) - mcGetVestedAtMonth(month - 1);
+}
+
+// ─── Simulation (13-variable engine · Rev 2) ─────────────────────────────────
+// Fixes applied from independent technical review:
+//   #1 burnBoost coefficient → documented supplyElasticity parameter (Var 13)
+//   #2 burn efficiency → explicit burnEfficiency parameter (Var 11)
+//   #3 staking → price feedback via floatSignal
+//   #4 logistic growth caps for network usage + wallet growth
+//   #5 separate wallet elasticities for burns, liquidity, staking
+//   #6 BTC return → user-adjustable btcAnnualReturn (Var 12)
+//   #7 path count → 1000 (set in MonteCarloTab)
+//   #8 probability labels → "scenario frequency" (set in mcSummary + UI)
+
+// Carrying capacity constants for logistic growth (#4)
+const MC_K_ACTIVITY = 10_000_000; // $10M/mo max network economic activity
+const MC_K_WALLETS = 5_000_000;   // 5M max active wallets
+
+// Wallet elasticity exponents (#5) — sub-linear scaling
+const MC_BURN_WALLET_ELASTICITY = 0.80;      // burns grow slightly slower than wallets
+const MC_LIQUIDITY_WALLET_ELASTICITY = 0.50;  // liquidity is capital-constrained
+const MC_STAKING_WALLET_ELASTICITY = 0.60;    // staking is incentive-dependent
+
+function mcRunSim(p, seed) {
+  const rng = mcMulberry32(seed);
+  const mFromTGE = Math.round((Date.now() - MC_TGE_DATE.getTime()) / (30.44 * 864e5));
+  const data = [];
+  let price = p.startPrice;
+  let totalSupply = 9_990_593_505;
+  let cumulBurned = TOTAL_SUPPLY - 9_990_593_505;
+  let rewardPool = 50_000_000;
+
+  // Derived starting state
+  let liquidityDepth = p.liquidityDepth;
+  let networkEconActivity = p.networkEconActivity;
+  let dexDailyVolume = p.dexDailyVolume;
+  let activeWallets = 12000;
+  const monthlyVol30d = (p.volatility30d / 100);
+
+  for (let mo = 0; mo <= p.months; mo++) {
+    const gm = mFromTGE + mo;
+    const newUnlocks = mo === 0 ? 0 : mcGetNewUnlocks(gm);
+    const totalVested = mcGetVestedAtMonth(gm);
+
+    // ─── Var 6: Network Usage Growth — LOGISTIC (Fix #4) ───
+    // Growth rate decays as activity approaches carrying capacity K
+    if (mo > 0) {
+      const logisticRate = (p.networkUsageGrowth / 100) * (1 - networkEconActivity / MC_K_ACTIVITY);
+      networkEconActivity *= (1 + Math.max(0, logisticRate));
+    }
+
+    // ─── Var 7: Active Wallet Growth — LOGISTIC (Fix #4) ───
+    if (mo > 0) {
+      const walletRate = (p.activeWalletGrowth / 100) * (1 - activeWallets / MC_K_WALLETS);
+      activeWallets *= (1 + Math.max(0, walletRate));
+    }
+
+    // ─── Wallet multipliers — SEPARATE ELASTICITIES (Fix #5) ───
+    const wRatio = activeWallets / 12000;
+    const burnMult = Math.pow(wRatio, MC_BURN_WALLET_ELASTICITY);
+    const liquidityMult = Math.pow(wRatio, MC_LIQUIDITY_WALLET_ELASTICITY);
+    const stakingMult = Math.pow(wRatio, MC_STAKING_WALLET_ELASTICITY);
+
+    // ─── Burns with BURN EFFICIENCY (Fix #2) ───
+    const burnUsd = networkEconActivity * burnMult * p.burnEfficiency;
+    const tokensBurned = price > 0 ? burnUsd / price : 0;
+
+    // ─── Deflationary mint (asymptotic toward 5B floor) ───
+    const supplyRatio = Math.max(0, (totalSupply - MC_DEFLATION_FLOOR) / (TOTAL_SUPPLY - MC_DEFLATION_FLOOR));
+    const mintRatio = 1 - supplyRatio;
+    const tokensMinted = tokensBurned * mintRatio;
+
+    if (mo > 0) {
+      totalSupply = Math.max(MC_DEFLATION_FLOOR, totalSupply - tokensBurned + tokensMinted);
+      cumulBurned += tokensBurned - tokensMinted;
+    }
+
+    // ─── Reward pool ───
+    const taxTokens = tokensMinted * 0.05;
+    rewardPool += tokensMinted - taxTokens;
+    const operatorClaims = rewardPool * 0.08;
+    rewardPool = Math.max(0, rewardPool - operatorClaims);
+
+    // ─── Treasury ───
+    const foundAlloc = MC_ALLOCATIONS.find((a) => a.name === "Foundation");
+    const foundVested = mcGetVestedAtMonth(gm) - mcGetVestedAtMonth(0);
+    const treasuryBalance = (foundAlloc ? (foundAlloc.tokens / TOTAL_SUPPLY) * foundVested : 0) * price + taxTokens * price;
+
+    // ─── Staking — uses staking-specific elasticity (Fix #5) ───
+    const stakingBase = 0.12;
+    const stakedTokens = totalVested * stakingBase * stakingMult * Math.min(2, 1 + mo * 0.01);
+
+    // ─── Var 5: Unlock Sell Pressure ───
+    const sellTokens = newUnlocks * (p.unlockSellPressure / 100);
+    const sellImpactUsd = sellTokens * price;
+
+    // ─── Var 1: CEX Coverage Score ───
+    const cexVolMult = 1 + (p.cexCoverageScore - 1) * 0.4;
+    const cexLiqBoost = 1 + (p.cexCoverageScore - 1) * 0.25;
+
+    // ─── Var 2 & 3: DEX Volume & Liquidity Depth — uses liquidity elasticity (Fix #5) ───
+    if (mo > 0) {
+      const volLogistic = (p.networkUsageGrowth / 200) * (1 - networkEconActivity / MC_K_ACTIVITY);
+      dexDailyVolume *= (1 + Math.max(0, volLogistic));
+      liquidityDepth = p.liquidityDepth * (price / p.startPrice) * cexLiqBoost * liquidityMult;
+    }
+    const effectiveLiquidity = liquidityDepth * cexLiqBoost;
+
+    // ─── Slippage ───
+    const slippage = sellImpactUsd > 0 && effectiveLiquidity > 0
+      ? sellImpactUsd / (effectiveLiquidity * 2)
+      : 0;
+
+    // ─── Circulating supply & float signal — STAKING FEEDS PRICE (Fix #3) ───
+    const effCirc = Math.max(0, totalVested - stakedTokens - cumulBurned);
+    const floatRatio = totalSupply > 0 ? effCirc / totalSupply : 1;
+    const floatSignal = (1 - floatRatio) * 0.02; // scarcity premium from locked supply
+
+    // ─── Var 8: Buy/Sell Imbalance ───
+    const imbalanceDrift = (p.buySellImbalance - 1) * 0.03;
+
+    // ─── Var 12: BTC — user-adjustable return (Fix #6) ───
+    const btcMoReturn = p.btcAnnualReturn / 12;
+    const btcAnnualVol = 0.65;
+    const btcMoVol = btcAnnualVol / Math.sqrt(12);
+    const btcShock = btcMoReturn + btcMoVol * mcRandNormal(rng);
+
+    // ─── Var 10: 30-Day Volatility ───
+    const moVol = monthlyVol30d * Math.sqrt(30) / Math.sqrt(12);
+
+    // ─── Price evolution — DOCUMENTED COEFFICIENTS (Fixes #1, #3) ───
+    if (mo > 0) {
+      // Fix #1: supplyElasticity replaces hardcoded 0.5
+      const burnBoost = tokensBurned > 0 ? (tokensBurned / totalSupply) * p.supplyElasticity : 0;
+      const totalVolume = (dexDailyVolume * 30 + dexDailyVolume * 30 * (cexVolMult - 1));
+      const volumeSignal = totalVolume > 0 ? Math.log(totalVolume / 50000) * 0.003 : 0;
+
+      // Fix #3: floatSignal closes the staking → price feedback loop
+      const drift = imbalanceDrift + burnBoost + volumeSignal + floatSignal;
+      const btcComponent = p.btcCorrelation * btcShock;
+      const idioComponent = (1 - p.btcCorrelation) * moVol * mcRandNormal(rng);
+
+      price = price * Math.exp(drift + btcComponent + idioComponent - slippage);
+      price = Math.max(price, 0.0001);
+    }
+
+    const rewardPerNode = operatorClaims > 0 ? (operatorClaims * price) / Math.max(1, stakedTokens / 1e6) : 0;
+
+    data.push({
+      month: mo, price, totalSupply, circulatingSupply: effCirc, totalVested, newUnlocks,
+      cumulBurned, tokensBurned: mo === 0 ? 0 : tokensBurned, tokensMinted: mo === 0 ? 0 : tokensMinted,
+      netDeflation: mo === 0 ? 0 : tokensBurned - tokensMinted, stakedTokens, rewardPool,
+      treasuryBalance, sellPressureUsd: sellImpactUsd, slippage, effectiveLiquidity,
+      marketCap: price * effCirc, fdv: price * totalSupply, mintRatio,
+      dexDailyVolume, activeWallets, networkEconActivity,
+      nodeROI: rewardPerNode > 0 ? ((rewardPerNode - 50) / 50) * 100 : -100,
+      monthlyRewardPerNode: rewardPerNode,
+    });
+  }
+  return data;
+}
+
+function mcRunAll(p, n) {
+  const results = [];
+  for (let i = 0; i < n; i++) results.push(mcRunSim(p, i + 1));
+  return results;
+}
+
+function mcPercentiles(sims, field, idx) {
+  const vals = sims.map((s) => s[idx]?.[field] ?? 0).sort((a, b) => a - b);
+  const p = (pct) => vals[Math.floor(pct / 100 * (vals.length - 1))] ?? 0;
+  return { p5: p(5), p10: p(10), p25: p(25), p50: p(50), p75: p(75), p90: p(90), p95: p(95) };
+}
+
+// ─── MC UI Components ─────────────────────────────────────────────────────────
+function MCFanChart({ sims, field, label, formatter, height = 140, color = MC.gold, showZero = false }) {
+  if (!sims || !sims.length || !sims[0]) return null;
+  const months = sims[0].length; const W = 800; const H = height;
+  const bands = [];
+  for (let i = 0; i < months; i++) bands.push(mcPercentiles(sims, field, i));
+  const allV = bands.flatMap((b) => [b.p5, b.p95]);
+  let maxV = Math.max(...allV); let minV = Math.min(...allV);
+  if (showZero) minV = Math.min(minV, 0);
+  if (maxV === minV) maxV = minV + 1;
+  const range = maxV - minV;
+  const x = (i) => (i / (months - 1)) * W;
+  const y = (v) => 10 + (1 - (v - minV) / range) * (H - 15);
+  const path = (key) => bands.map((b, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(b[key]).toFixed(1)}`).join(" ");
+  const area = (top, bot) => {
+    const t = bands.map((b, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(b[top]).toFixed(1)}`).join(" ");
+    const b2 = [...bands].reverse().map((b, i) => `L${x(months - 1 - i).toFixed(1)},${y(b[bot]).toFixed(1)}`).join(" ");
+    return `${t} ${b2} Z`;
+  };
+  const f = bands[bands.length - 1];
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <div style={{ fontSize: 12, color: MC.subtle, letterSpacing: "0.1em", ...M, marginBottom: 8 }}>{label}</div>
+      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: "block" }}>
+        <path d={area("p95", "p5")} fill={color} opacity={0.08} />
+        <path d={area("p75", "p25")} fill={color} opacity={0.15} />
+        <path d={path("p50")} fill="none" stroke={color} strokeWidth="2" />
+        {showZero && minV < 0 && maxV > 0 && <line x1={0} y1={y(0)} x2={W} y2={y(0)} stroke="#333" strokeWidth="1" strokeDasharray="4,4" />}
+      </svg>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+        <span style={{ fontSize: 11, color: MC.dim, ...M }}>Now</span>
+        <div style={{ display: "flex", gap: 14, fontSize: 11, ...M }}>
+          <span style={{ color: `${color}88` }}>P5: {formatter(f?.p5)}</span>
+          <span style={{ color, fontWeight: 600 }}>P50: {formatter(f?.p50)}</span>
+          <span style={{ color: `${color}88` }}>P95: {formatter(f?.p95)}</span>
+        </div>
+        <span style={{ fontSize: 11, color: MC.dim, ...M }}>{months - 1}mo</span>
+      </div>
+    </div>
+  );
+}
+
+function MCMetric({ label, value, sub, accent }) {
+  return (
+    <div style={{ background: "#0D1117", border: `1px solid ${MC.cardBorder}`, borderRadius: 8, padding: "14px 16px" }}>
+      <div style={{ color: MC.dim, fontSize: 11, letterSpacing: "0.12em", ...M, marginBottom: 5 }}>{label}</div>
+      <div style={{ color: accent || MC.text, fontSize: 18, fontWeight: 700, ...M }}>{value}</div>
+      {sub && <div style={{ color: MC.muted, fontSize: 11, marginTop: 3, ...M }}>{sub}</div>}
+    </div>
+  );
+}
+
+function MCSlider({ label, value, onChange, min, max, step, format, tip }) {
+  const [showTip, setShowTip] = useState(false);
+  return (
+    <div style={{ marginBottom: 14 }} onMouseEnter={() => tip && setShowTip(true)} onMouseLeave={() => setShowTip(false)}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+        <span style={{ fontSize: 12, color: MC.muted, letterSpacing: "0.06em", ...M, cursor: tip ? "help" : "default" }}>
+          {label} {tip && <span style={{ color: MC.veryDim }}>ⓘ</span>}
+        </span>
+        <span style={{ fontSize: 13, color: MC.gold, fontWeight: 600, ...M }}>{format ? format(value) : value}</span>
+      </div>
+      <input type="range" min={min} max={max} step={step} value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ width: "100%", accentColor: MC.gold, height: 5, cursor: "pointer" }} />
+      {showTip && tip && (
+        <div style={{ background: "#1A1E24", border: `1px solid ${MC.cardBorder}`, borderRadius: 6, padding: "8px 12px", fontSize: 11, color: MC.muted, ...M, lineHeight: 1.5, marginTop: 4 }}>
+          💡 {tip}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MCSection({ title, explanation, children }) {
+  const [showExp, setShowExp] = useState(false);
+  return (
+    <div style={{ background: MC.card, border: `1px solid ${MC.cardBorder}`, borderRadius: 10, padding: "18px 22px", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, borderBottom: `1px solid ${MC.border}`, paddingBottom: 10 }}>
+        <div style={{ fontSize: 14, color: MC.subtle, letterSpacing: "0.1em", fontWeight: 700, ...M }}>{title}</div>
+        {explanation && (
+          <button onClick={() => setShowExp(!showExp)}
+            style={{ background: showExp ? "#1A1E24" : "none", border: `1px solid ${showExp ? MC.gold : "#222"}`, borderRadius: 4, color: showExp ? MC.gold : MC.dim, fontSize: 11, padding: "3px 10px", cursor: "pointer", ...M }}>
+            {showExp ? "HIDE" : "WHAT IS THIS?"}
+          </button>
+        )}
+      </div>
+      {showExp && explanation && (
+        <div style={{ background: "#0D1117", border: `1px solid ${MC.cardBorder}`, borderRadius: 6, padding: "12px 16px", marginBottom: 14, fontSize: 12, color: MC.muted, ...M, lineHeight: 1.7 }}>
+          💡 {explanation}
+        </div>
+      )}
+      {children}
+    </div>
+  );
+}
+
+// ─── Executive Summary Generator (Fix #8: scenario frequency, not probability) ─
+function mcSummary(sims, months, startPrice) {
+  const fp = mcPercentiles(sims, "price", months);
+  const fs = mcPercentiles(sims, "totalSupply", months);
+  const fc = mcPercentiles(sims, "circulatingSupply", months);
+  const fm = mcPercentiles(sims, "marketCap", months);
+  const freqAbove = sims.filter((s) => s[months]?.price > startPrice).length / sims.length * 100;
+  const freq2x = sims.filter((s) => s[months]?.price > startPrice * 2).length / sims.length * 100;
+  const freq50drop = sims.filter((s) => s[months]?.price < startPrice * 0.5).length / sims.length * 100;
+  const priceMult = (fp.p50 / startPrice).toFixed(1);
+  const deflated = ((TOTAL_SUPPLY - fs.p50) / TOTAL_SUPPLY * 100).toFixed(1);
+  const outlook = freqAbove > 60 ? "optimistic" : freqAbove < 40 ? "cautious" : "neutral";
+  return {
+    text: `Over ${mcFmtMo(months)}, ${freqAbove.toFixed(0)}% of modelled scenarios show AUKI above today's ${mcFmtPrice(startPrice)}. Median price: ${mcFmtPrice(fp.p50)} (${priceMult}x). Range: ${mcFmtPrice(fp.p10)} to ${mcFmtPrice(fp.p90)} (P10–P90). Supply deflates ${deflated}% to ${mcFmtB(fs.p50)}. Median market cap: ${mcFmtUsd(fm.p50)}.`,
+    bullets: [
+      `${freq2x.toFixed(0)}% of scenarios reach 2x or higher`,
+      `${freq50drop.toFixed(0)}% of scenarios show 50%+ drawdown`,
+      `Circulating supply: ${mcFmtB(fc.p50)} (P50)`,
+    ],
+    outlook, freqAbove, freq2x, freq50drop, fp, fs, fc, fm,
+  };
+}
+
+// ─── Web Worker hook for non-blocking simulation ──────────────────────────────
+function useMCWorker(params, numSims) {
+  const [sims, setSims] = useState(null);
+  const [running, setRunning] = useState(false);
+  const workerRef = useRef(null);
+  useEffect(() => {
+    setRunning(true);
+    if (workerRef.current) workerRef.current.terminate();
+    const worker = new Worker("/mcWorker.js");
+    workerRef.current = worker;
+    worker.onmessage = (e) => { setSims(e.data); setRunning(false); };
+    worker.onerror = () => { setRunning(false); };
+    worker.postMessage({ params, numSims });
+    return () => worker.terminate();
+  }, [JSON.stringify(params), numSims]);
+  return { sims, running };
+}
+
+// ─── Monte Carlo Tab (13 variables · Rev 2) ──────────────────────────────────
+function MonteCarloTab({ price: livePrice }) {
+  const FALLBACK_PRICE = 0.00929; // keep in sync with fetchAukiPrice fallback
+  const startPrice = livePrice || FALLBACK_PRICE;
+  const usingFallbackPrice = !livePrice;
+  const NUM_SIMS = 1000; // Fix #7: increased from 500 for stable tail estimates
+  const [months, setMonths] = useState(36);
+
+  // === THE 10 CORE VARIABLES ===
+  // Market Structure
+  const [cexCoverageScore, setCexCoverageScore] = useState(2);
+  const [dexDailyVolume, setDexDailyVolume] = useState(20000);
+  const [liquidityDepth, setLiquidityDepth] = useState(580000);
+  // Fundamentals
+  const [networkEconActivity, setNetworkEconActivity] = useState(25000);
+  const [unlockSellPressure, setUnlockSellPressure] = useState(35);
+  const [networkUsageGrowth, setNetworkUsageGrowth] = useState(8);
+  const [activeWalletGrowth, setActiveWalletGrowth] = useState(5);
+  // Market Dynamics
+  const [buySellImbalance, setBuySellImbalance] = useState(1.0);
+  const [btcCorrelation, setBtcCorrelation] = useState(0.6);
+  const [volatility30d, setVolatility30d] = useState(8);
+
+  // === 3 NEW REVIEW VARIABLES (Fixes #1, #2, #6) ===
+  const [burnEfficiency, setBurnEfficiency] = useState(0.5);        // Var 11 (Fix #2)
+  const [btcAnnualReturn, setBtcAnnualReturn] = useState(0.15);     // Var 12 (Fix #6)
+  const [supplyElasticity, setSupplyElasticity] = useState(0.30);   // Var 13 (Fix #1)
+
+  // Run simulation (off main thread via Web Worker)
+  const { sims, running: simRunning } = useMCWorker({
+    months, startPrice,
+    cexCoverageScore, dexDailyVolume, liquidityDepth,
+    networkEconActivity, unlockSellPressure, networkUsageGrowth,
+    activeWalletGrowth, buySellImbalance, btcCorrelation, volatility30d,
+    burnEfficiency, btcAnnualReturn, supplyElasticity,
+  }, NUM_SIMS);
+
+  const summary = useMemo(() => sims ? mcSummary(sims, months, startPrice) : null, [sims, months, startPrice]);
+  const medianSim = useMemo(() => {
+    if (!sims || !sims.length) return null;
+    const p50price = mcPercentiles(sims, "price", months).p50;
+    return sims.reduce((best, sim) => {
+      const termPrice = sim[months]?.price ?? 0;
+      const bestPrice = best[months]?.price ?? 0;
+      return Math.abs(termPrice - p50price) < Math.abs(bestPrice - p50price) ? sim : best;
+    });
+  }, [sims, months]);
+
+  // Deflation timeline
+  const deflationTimeline = useMemo(() => {
+    return [9e9, 8e9, 7.5e9, 7e9, 6e9, 5.5e9, 5e9].map((target) => {
+      const arr = sims.map((s) => { const i = s.findIndex((d) => d.totalSupply <= target); return i >= 0 ? i : Infinity; }).sort((a, b) => a - b);
+      const med = arr[Math.floor(arr.length / 2)];
+      return { target, months: med === Infinity ? null : med, label: mcFmtB(target) };
+    });
+  }, [sims]);
+
+  // Liquidity stress — uses the user's liquidity depth setting
+  const liqStress = [10000, 25000, 50000, 100000, 250000, 500000].map((sz) => ({
+    size: sz, slippage: (sz / (liquidityDepth * 2)) * 100,
+  }));
+
+  // Unlock bar data
+  const unlockData = useMemo(() => {
+    const mFromTGE = Math.round((Date.now() - MC_TGE_DATE.getTime()) / (30.44 * 864e5));
+    const step = Math.max(1, Math.floor(months / 12));
+    const bars = [];
+    for (let m = 0; m <= months; m += step) {
+      bars.push({ unlocks: mcGetNewUnlocks(mFromTGE + m) * step, label: `+${m}mo` });
+    }
+    return bars;
+  }, [months]);
+
+  const outlookColor = summary.outlook === "optimistic" ? MC.green : summary.outlook === "cautious" ? MC.red : MC.gold;
+
+  if (!sims || !summary) return <Loader msg="RUNNING SIMULATION…" />;
+
+  return (
+    <div>
+      {/* ─── Recalculating indicator ───────────────────────────────── */}
+      {simRunning && (
+        <div style={{ position: "fixed", top: 16, right: 16, background: "#1A1400", border: `1px solid ${MC.gold}`, borderRadius: 6, padding: "6px 14px", color: MC.gold, fontSize: 12, ...M, zIndex: 20 }}>
+          ⟳ RECALCULATING…
+        </div>
+      )}
+      {/* ─── Fallback price warning ────────────────────────────────── */}
+      {usingFallbackPrice && (
+        <div style={{ background: "#2A1A00", border: "1px solid #E67E22", borderRadius: 8, padding: "10px 16px", marginBottom: 12, color: "#E67E22", fontSize: 13, ...M }}>
+          ⚠ LIVE PRICE UNAVAILABLE — simulation using estimated price ${FALLBACK_PRICE}. Outputs may not reflect current market conditions.
+        </div>
+      )}
+      {/* ─── Executive Summary ─────────────────────────────────────── */}
+      <div style={{ background: "linear-gradient(135deg, #0D1117 0%, #111820 100%)", border: `1px solid ${MC.cardBorder}`, borderRadius: 12, padding: "24px 28px", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 22 }}>📊</span>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: MC.text, ...M, letterSpacing: "0.08em" }}>EXECUTIVE SUMMARY</div>
+              <div style={{ fontSize: 12, color: MC.muted, ...M }}>{NUM_SIMS} simulations · {mcFmtMo(months)} horizon</div>
+            </div>
+          </div>
+          <div style={{ background: `${outlookColor}20`, border: `1px solid ${outlookColor}40`, borderRadius: 6, padding: "6px 14px" }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: outlookColor, ...M }}>{summary.outlook.toUpperCase()}</span>
+          </div>
+        </div>
+        <div style={{ fontSize: 14, color: "#c0c0c0", ...M, lineHeight: 1.8, marginBottom: 16 }}>{summary.text}</div>
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 18 }}>
+          {summary.bullets.map((b, i) => <div key={i} style={{ fontSize: 12, color: MC.muted, ...M }}>{b}</div>)}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10 }}>
+          <MCMetric label="CURRENT PRICE" value={mcFmtPrice(startPrice)} sub="Live" accent={MC.gold} />
+          <MCMetric label={`P50 PRICE (${mcFmtMo(months)})`} value={mcFmtPrice(summary.fp.p50)} sub={`P10: ${mcFmtPrice(summary.fp.p10)} · P90: ${mcFmtPrice(summary.fp.p90)}`} accent={summary.fp.p50 >= startPrice ? MC.green : MC.red} />
+          <MCMetric label="SCENARIOS ABOVE CURRENT" value={mcFmtPct(summary.freqAbove)} accent={summary.freqAbove > 50 ? MC.green : MC.red} />
+          <MCMetric label="SCENARIOS 2X+" value={mcFmtPct(summary.freq2x)} accent={MC.green} />
+          <MCMetric label="SCENARIOS 50%+ DROP" value={mcFmtPct(summary.freq50drop)} accent={MC.red} />
+        </div>
+      </div>
+
+      {/* ─── Variables Panel ───────────────────────────────────────── */}
+      <div style={{ background: MC.card, border: `1px solid ${MC.cardBorder}`, borderRadius: 10, padding: "18px 22px", marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <span style={{ fontSize: 14, color: MC.subtle, letterSpacing: "0.1em", fontWeight: 700, ...M }}>⚙️ 13 SIMULATION VARIABLES</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 11, color: MC.dim, ...M }}>HORIZON</span>
+            <select value={months} onChange={(e) => setMonths(Number(e.target.value))}
+              style={{ background: "#0D0D0D", border: `1px solid ${MC.cardBorder}`, borderRadius: 4, color: MC.muted, ...M, fontSize: 12, padding: "4px 8px", cursor: "pointer" }}>
+              {[12, 24, 36, 48, 60, 84].map((n) => <option key={n} value={n}>{mcFmtMo(n)}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 24 }}>
+          {/* Column 1: Market Structure */}
+          <div>
+            <div style={{ fontSize: 11, color: MC.subtle, letterSpacing: "0.1em", ...M, marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${MC.border}` }}>MARKET STRUCTURE</div>
+            <MCSlider label="1 · CEX COVERAGE SCORE" value={cexCoverageScore} onChange={setCexCoverageScore}
+              min={1} max={10} step={1} format={(v) => `${v}/10`}
+              tip="Number, quality, and liquidity of exchanges listing AUKI. 1 = MEXC only. 5 = several mid-tier CEXes. 10 = Binance + Coinbase. Higher = more accessibility, institutional reach, and liquidity." />
+            <MCSlider label="2 · DEX DAILY VOLUME" value={dexDailyVolume} onChange={setDexDailyVolume}
+              min={1000} max={500000} step={1000} format={mcFmtUsd}
+              tip="On-chain $AUKI trading activity across DEXes (Uniswap, PancakeSwap, Aerodrome). Strongest signal of organic market participation. Current: ~$15–25K/day." />
+            <MCSlider label="3 · LIQUIDITY DEPTH (±2%)" value={liquidityDepth} onChange={setLiquidityDepth}
+              min={50000} max={5000000} step={10000} format={mcFmtUsd}
+              tip="USD liquidity available within a tight ±2% price range. Determines slippage, volatility resistance, and market stability. Current: ~$580K total DEX TVL." />
+          </div>
+
+          {/* Column 2: Fundamentals */}
+          <div>
+            <div style={{ fontSize: 11, color: MC.subtle, letterSpacing: "0.1em", ...M, marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${MC.border}` }}>FUNDAMENTALS</div>
+            <MCSlider label="4 · NETWORK ECONOMIC ACTIVITY" value={networkEconActivity} onChange={setNetworkEconActivity}
+              min={0} max={500000} step={5000} format={(v) => `${mcFmtUsd(v)}/mo`}
+              tip="Real economic value generated through the AUKI ecosystem monthly. Drives burn-credit-mint. Growth capped at $10M/mo (logistic curve)." />
+            <MCSlider label="5 · UNLOCK SELL PRESSURE" value={unlockSellPressure} onChange={setUnlockSellPressure}
+              min={0} max={100} step={5} format={(v) => `${v}%`}
+              tip="Estimated % of unlocked/vested tokens sold into the market. Models real supply shock and market absorption risk. 20% = holders hold. 60% = heavy dumping." />
+            <MCSlider label="6 · NETWORK USAGE GROWTH" value={networkUsageGrowth} onChange={setNetworkUsageGrowth}
+              min={0} max={30} step={1} format={(v) => `${v}%/mo`}
+              tip="Growth in protocol usage. Logistic curve — rate decays as activity approaches $10M/mo carrying capacity. 8%/mo doubles activity in ~9 months." />
+            <MCSlider label="7 · ACTIVE WALLET GROWTH" value={activeWalletGrowth} onChange={setActiveWalletGrowth}
+              min={0} max={30} step={1} format={(v) => `${v}%/mo`}
+              tip="Growth in unique wallets. Logistic curve — rate decays as wallets approach 5M ceiling. Sub-linear elasticities: burns (0.8), liquidity (0.5), staking (0.6)." />
+          </div>
+
+          {/* Column 3: Market Dynamics */}
+          <div>
+            <div style={{ fontSize: 11, color: MC.subtle, letterSpacing: "0.1em", ...M, marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${MC.border}` }}>MARKET DYNAMICS</div>
+            <MCSlider label="8 · BUY/SELL IMBALANCE" value={buySellImbalance} onChange={setBuySellImbalance}
+              min={0.5} max={1.5} step={0.05} format={(v) => v.toFixed(2)}
+              tip="Ratio of buying pressure to selling pressure. >1 = net accumulation (bullish). <1 = net distribution (bearish). 1.0 = balanced. Reveals market sentiment." />
+            <MCSlider label="9 · BTC CORRELATION" value={btcCorrelation} onChange={setBtcCorrelation}
+              min={0} max={1} step={0.05} format={(v) => v.toFixed(2)}
+              tip="Degree to which AUKI price follows Bitcoin. 0 = fully independent. 1 = moves 1:1 with BTC. Higher = more dependence on broader crypto market cycles." />
+            <MCSlider label="10 · 30-DAY VOLATILITY" value={volatility30d} onChange={setVolatility30d}
+              min={1} max={30} step={1} format={(v) => `${v}%`}
+              tip="Rolling 30-day price volatility. Core risk metric for stress testing and uncertainty modelling. 5% = stable. 15% = volatile. 25% = extreme." />
+          </div>
+
+          {/* Column 4: Model Calibration (Review fixes #1, #2, #6) */}
+          <div>
+            <div style={{ fontSize: 11, color: MC.subtle, letterSpacing: "0.1em", ...M, marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${MC.border}` }}>MODEL CALIBRATION</div>
+            <MCSlider label="11 · BURN EFFICIENCY" value={burnEfficiency} onChange={setBurnEfficiency}
+              min={0.1} max={1.0} step={0.05} format={(v) => `${(v * 100).toFixed(0)}%`}
+              tip="Fraction of network economic activity that actually reaches the burn mechanism after protocol fees, conversion delays, and failed transactions. 40% = conservative. 80% = optimistic. 100% = theoretical maximum." />
+            <MCSlider label="12 · BTC EXPECTED RETURN" value={btcAnnualReturn} onChange={setBtcAnnualReturn}
+              min={-0.50} max={0.80} step={0.05} format={(v) => `${(v * 100).toFixed(0)}%/yr`}
+              tip="Expected annual BTC return assumption. Bear: -30% to -50%. Base: +15%. Bull: +50% to +80%. This drift is embedded in every path — it's the market regime assumption." />
+            <MCSlider label="13 · SUPPLY ELASTICITY" value={supplyElasticity} onChange={setSupplyElasticity}
+              min={0.05} max={0.50} step={0.05} format={(v) => v.toFixed(2)}
+              tip="How much price responds to supply burns. 0.30 = markets price 30% of supply shock immediately (conservative). 0.50 = half priced in. Higher = stronger burn→price feedback." />
+          </div>
+        </div>
+      </div>
+
+      {/* ─── 1. Price Trajectories ──────────────────────────────────── */}
+      <MCSection title="1 · PRICE TRAJECTORIES" explanation="Range of possible AUKI prices over time. Solid line = median (50th percentile). Shaded bands = 25th–75th and 5th–95th percentile ranges. Wider bands = more uncertainty.">
+        <MCFanChart sims={sims} field="price" label="TOKEN PRICE (USD)" formatter={mcFmtPrice} height={180} color={MC.gold} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 10 }}>
+          <MCMetric label="P5 (WORST 5%)" value={mcFmtPrice(summary.fp.p5)} accent={MC.red} />
+          <MCMetric label="P25" value={mcFmtPrice(summary.fp.p25)} accent={MC.red} />
+          <MCMetric label="P75" value={mcFmtPrice(summary.fp.p75)} accent={MC.green} />
+          <MCMetric label="P95 (BEST 5%)" value={mcFmtPrice(summary.fp.p95)} accent={MC.green} />
+        </div>
+      </MCSection>
+
+      {/* ─── 2. Supply Deflation ───────────────────────────────────── */}
+      <MCSection title="2 · SUPPLY DEFLATION" explanation="The burn-credit-mint mechanism destroys tokens when services are used, while minting fewer as rewards. Supply approaches an asymptotic floor of 5B — the closer it gets, the slower deflation becomes.">
+        <MCFanChart sims={sims} field="totalSupply" label="TOTAL SUPPLY — TOWARD 5B FLOOR" formatter={mcFmtB} height={160} color={MC.blue} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 10 }}>
+          <MCMetric label="CURRENT SUPPLY" value={mcFmtB(9_990_593_505)} sub={`${mcFmtB(TOTAL_SUPPLY - 9_990_593_505)} burned`} accent={MC.blue} />
+          <MCMetric label="BURN/MO (MO 12)" value={mcFmtB(mcPercentiles(sims, "tokensBurned", Math.min(12, months)).p50)} accent={MC.red} />
+          <MCMetric label="NET DEFLATION/MO" value={mcFmtB(mcPercentiles(sims, "netDeflation", Math.min(12, months)).p50)} accent={MC.green} />
+          <MCMetric label={`SUPPLY AT ${mcFmtMo(months)}`} value={mcFmtB(summary.fs.p50)} accent={MC.blue} />
+        </div>
+      </MCSection>
+
+      {/* ─── 3. Treasury Runway ────────────────────────────────────── */}
+      <MCSection title="3 · TREASURY RUNWAY" explanation="Foundation treasury funded by 18.74% allocation (7-year vesting) plus protocol tax on every mint. Used for operations, grants, and node participation rewards.">
+        <MCFanChart sims={sims} field="treasuryBalance" label="TREASURY VALUE (USD)" formatter={mcFmtUsd} height={140} color={MC.gold} />
+      </MCSection>
+
+      {/* ─── 4. Circulating Supply ─────────────────────────────────── */}
+      <MCSection title="4 · CIRCULATING SUPPLY" explanation="Effective circulating supply = vested tokens minus staked minus burned. This is the actual free-floating supply available for trading.">
+        <MCFanChart sims={sims} field="circulatingSupply" label="EFFECTIVE CIRCULATING SUPPLY" formatter={mcFmtB} height={140} color={MC.purple} />
+      </MCSection>
+
+      {/* ─── 5. Unlock Sell Pressure ───────────────────────────────── */}
+      <MCSection title="5 · VESTING UNLOCK SELL PRESSURE" explanation="When tokens vest, holders can sell. Pre-sale 2 and Advisors fully unlock ~Aug 2026. Team tokens have a 6-month cliff then 42 months linear vesting.">
+        <div style={{ display: "flex", gap: 4, alignItems: "flex-end", height: 100, marginBottom: 12 }}>
+          {unlockData.map((d, i) => {
+            const max = Math.max(...unlockData.map((x) => x.unlocks), 1);
+            return (
+              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                <div style={{ fontSize: 9, color: MC.dim, ...M }}>{mcFmtB(d.unlocks)}</div>
+                <div style={{ width: "100%", height: `${(d.unlocks / max) * 70}px`, background: MC.red, borderRadius: "3px 3px 0 0", minHeight: 2 }} />
+                <div style={{ fontSize: 9, color: MC.veryDim, ...M }}>{d.label}</div>
+              </div>
+            );
+          })}
+        </div>
+        <MCFanChart sims={sims} field="sellPressureUsd" label="SELL PRESSURE FROM UNLOCKS (USD)" formatter={mcFmtUsd} height={120} color={MC.red} />
+      </MCSection>
+
+      {/* ─── 6. Liquidity Stress ───────────────────────────────────── */}
+      <MCSection title="6 · LIQUIDITY STRESS TEST" explanation={`With ~${mcFmtUsd(liquidityDepth)} liquidity depth, large sells cause slippage. Estimated price impact for different sell sizes at current depth.`}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8 }}>
+          {liqStress.map((l) => (
+            <div key={l.size} style={{ textAlign: "center", background: "#0D1117", borderRadius: 6, padding: "10px 6px" }}>
+              <div style={{ fontSize: 14, color: l.slippage > 10 ? MC.red : l.slippage > 5 ? MC.gold : MC.green, fontWeight: 700, ...M }}>{mcFmtPct(l.slippage)}</div>
+              <div style={{ fontSize: 10, color: MC.dim, ...M, marginTop: 4 }}>{mcFmtUsd(l.size)} sell</div>
+            </div>
+          ))}
+        </div>
+      </MCSection>
+
+      {/* ─── 7. Burn Feedback Loop ─────────────────────────────────── */}
+      <MCSection title="7 · BURN → DEFLATION LOOP" explanation="More network usage → more burns → less supply → value accrual. The mint side creates fewer tokens than burned, approaching 1:1 as supply nears 5B.">
+        <MCFanChart sims={sims} field="tokensBurned" label="MONTHLY TOKENS BURNED" formatter={mcFmtB} height={130} color={MC.green} />
+        <MCFanChart sims={sims} field="tokensMinted" label="MONTHLY TOKENS MINTED (REWARDS)" formatter={mcFmtB} height={130} color={MC.purple} />
+      </MCSection>
+
+      {/* ─── 8. Staking vs Float ───────────────────────────────────── */}
+      <MCSection title="8 · STAKING vs FLOAT" explanation="Tokens staked in node contracts are locked and removed from circulation. Staking participation grows with active wallet growth.">
+        <MCFanChart sims={sims} field="stakedTokens" label="STAKED TOKENS" formatter={mcFmtB} height={130} color={MC.green} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 10 }}>
+          <MCMetric label="STAKED NOW" value={mcFmtB(mcPercentiles(sims, "stakedTokens", 0).p50)} accent={MC.green} />
+          <MCMetric label={`STAKED AT ${mcFmtMo(months)}`} value={mcFmtB(mcPercentiles(sims, "stakedTokens", months).p50)} accent={MC.green} />
+          <MCMetric label="EFFECTIVE FLOAT" value={mcFmtB(summary.fc.p50)} sub="Circ − Staked − Burned" accent={MC.purple} />
+        </div>
+      </MCSection>
+
+      {/* ─── 9. Reward Pool ────────────────────────────────────────── */}
+      <MCSection title="9 · REWARD POOL HEALTH" explanation="Pays node operators. Replenished by deflationary mints, drained by operator claims. If depleted, Foundation must step in.">
+        <MCFanChart sims={sims} field="rewardPool" label="REWARD POOL (TOKENS)" formatter={mcFmtB} height={130} color={MC.gold} />
+      </MCSection>
+
+      {/* ─── 10. Node Break-Even ───────────────────────────────────── */}
+      <MCSection title="10 · NODE OPERATOR BREAK-EVEN" explanation="Can you profitably run a posemesh node? Models monthly USD reward per node vs ~$50/month operating cost.">
+        <MCFanChart sims={sims} field="nodeROI" label="MONTHLY NODE ROI (%)" formatter={mcFmtPct} height={120} color={MC.green} showZero />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 10 }}>
+          <MCMetric label="NODE COST (EST)" value="$50/mo" accent={MC.muted} />
+          <MCMetric label={`ROI AT ${mcFmtMo(months)}`} value={mcFmtPct(mcPercentiles(sims, "nodeROI", months).p50)} accent={mcPercentiles(sims, "nodeROI", months).p50 > 0 ? MC.green : MC.red} />
+          <MCMetric label="BREAK-EVEN" value={(() => { const i = medianSim?.findIndex((d) => d.nodeROI > 0); return i >= 0 ? `Month ${i}` : `>${mcFmtMo(months)}`; })()} accent={MC.gold} />
+        </div>
+      </MCSection>
+
+      {/* ─── 11. Deflation Timeline ────────────────────────────────── */}
+      <MCSection title="11 · DEFLATION TIMELINE" explanation="Estimated time to reach each supply milestone. Deflation is asymptotic — approaching 5B gets exponentially harder.">
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${deflationTimeline.length}, 1fr)`, gap: 8 }}>
+          {deflationTimeline.map((t) => (
+            <div key={t.target} style={{ background: "#0D1117", border: `1px solid ${MC.cardBorder}`, borderRadius: 8, padding: "14px 10px", textAlign: "center" }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: MC.text, ...M }}>{t.label}</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: t.months != null ? MC.gold : MC.veryDim, ...M, marginTop: 8 }}>
+                {t.months != null ? mcFmtMo(t.months) : `>${mcFmtMo(months)}`}
+              </div>
+            </div>
+          ))}
+        </div>
+      </MCSection>
+
+      {/* ─── 12. Market Cap ────────────────────────────────────────── */}
+      <MCSection title="12 · MARKET CAP PROJECTION" explanation="Market cap = price × circulating supply. FDV = price × total supply.">
+        <MCFanChart sims={sims} field="marketCap" label="MARKET CAP (USD)" formatter={mcFmtUsd} height={140} color={MC.gold} />
+        <MCFanChart sims={sims} field="fdv" label="FULLY DILUTED VALUATION (USD)" formatter={mcFmtUsd} height={140} color={MC.purple} />
+      </MCSection>
+
+      {/* ─── Footer ────────────────────────────────────────────────── */}
+      <div style={{ textAlign: "center", padding: "20px 0", color: MC.veryDim, fontSize: 11, ...M, letterSpacing: "0.1em" }}>
+        MONTE CARLO · {NUM_SIMS} PATHS · {mcFmtMo(months)} · 13 VARIABLES · SCENARIO SIMULATION · NOT FINANCIAL ADVICE
+      </div>
+    </div>
+  );
+}
+
+
+
+// ─── Password protection (server-side via Netlify function) ───────────────────
 
 function LoginScreen({ onAuth }) {
   const [pw, setPw] = useState("");
@@ -903,11 +1610,21 @@ function LoginScreen({ onAuth }) {
   const attempt = async () => {
     setChecking(true);
     setError(false);
-    const hash = await hashPassword(pw);
-    if (hash === PASS_HASH) {
-      sessionStorage.setItem("auki_auth", "1");
-      onAuth();
-    } else {
+    try {
+      const res = await fetch("/.netlify/functions/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pw }),
+      });
+      if (res.ok) {
+        const { token } = await res.json();
+        sessionStorage.setItem("auki_auth", token);
+        onAuth();
+      } else {
+        setError(true);
+        setPw("");
+      }
+    } catch {
       setError(true);
       setPw("");
     }
@@ -955,6 +1672,12 @@ export default function AukiTreasury() {
 
   const [mode, setMode] = useState("tokens");
   const [activeTab, setActiveTab] = useState("balances");
+  const [mcMounted, setMcMounted] = useState(false); // keep MC tab alive once visited
+
+  // Track first visit to Monte Carlo tab
+  useEffect(() => {
+    if (activeTab === "montecarlo") setMcMounted(true);
+  }, [activeTab]);
 
   const [price, setPrice] = useState(null);
   const [priceTs, setPriceTs] = useState(null);
@@ -1235,20 +1958,21 @@ export default function AukiTreasury() {
   </div>
 
   <div style={{ display: "flex", flexDirection: "column", gap: 12, ...M }}>
-
+    {(() => { const totalMktVol = dexVol24hUsd + mexcVol24hUsd; return (<>
     <div style={{ display:"flex", justifyContent:"space-between" }}>
       <span style={{ color:"#9AA4AF" }}>DEX SHARE</span>
       <span style={{ color:"#7CC4A4", fontWeight:600 }}>
-        {((dexVol24hUsd / (dexVol24hUsd + mexcVol24hUsd)) * 100).toFixed(1)}%
+        {totalMktVol > 0 ? ((dexVol24hUsd / totalMktVol) * 100).toFixed(1) + "%" : "—"}
       </span>
     </div>
 
     <div style={{ display:"flex", justifyContent:"space-between" }}>
       <span style={{ color:"#9AA4AF" }}>CEX SHARE</span>
       <span style={{ color:"#C8A96E", fontWeight:600 }}>
-        {((mexcVol24hUsd / (dexVol24hUsd + mexcVol24hUsd)) * 100).toFixed(1)}%
+        {totalMktVol > 0 ? ((mexcVol24hUsd / totalMktVol) * 100).toFixed(1) + "%" : "—"}
       </span>
     </div>
+    </>); })()}
 
     <div style={{ borderTop:"1px solid #1E1E1E", margin:"6px 0" }} />
 
@@ -1269,6 +1993,7 @@ export default function AukiTreasury() {
             ["movements", "MOVEMENT LOG"],
             ["dex", "DEX MARKET ACTIVITY"],
             ["cex", "CEX MARKET ACTIVITY"],
+            ["montecarlo", "MONTE CARLO"],
           ].map(([id, lbl]) => (
             <button
               key={id}
@@ -1310,6 +2035,11 @@ export default function AukiTreasury() {
             dailyLoading={mexcDailyLoading}
             dailyError={mexcDailyError}
           />
+        )}
+        {(activeTab === "montecarlo" || mcMounted) && (
+          <div style={{ display: activeTab === "montecarlo" ? "block" : "none" }}>
+            <MonteCarloTab price={dp} />
+          </div>
         )}
       </div>
     </div>

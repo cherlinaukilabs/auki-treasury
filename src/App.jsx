@@ -996,7 +996,71 @@ const MC_BURN_WALLET_ELASTICITY = 0.80;      // burns grow slightly slower than 
 const MC_LIQUIDITY_WALLET_ELASTICITY = 0.50;  // liquidity is capital-constrained
 const MC_STAKING_WALLET_ELASTICITY = 0.60;    // staking is incentive-dependent
 
-function mcRunSim(p, seed) {
+// ─── ASSUMED, NOT CALIBRATED ──────────────────────────────────────────────────
+// Rev 3 exposes its assumptions instead of hiding them. NONE of these is fitted
+// to AUKI price history (there isn't enough of it). The diagnostics panel renders
+// this object so a knowledgeable viewer can see exactly what is being assumed.
+const ASSUMED_COEFFS = {
+  imbalanceDriftCoeff: 0.03,   // per unit of buy/sell ratio
+  volumeSignalCoeff: 0.003,    // per log-unit of volume vs $50K baseline
+  floatSignalCoeff: 0.02,      // scarcity premium per unit locked
+  btcAnnualVol: 0.65,          // historical BTC realised vol 2020–25
+  // — regime model —
+  tDegreesFreedom: 5,          // Student-t df=5 → finite kurtosis, fat but sane
+  stressEntryProb: 0.05,       // P(calm → stress) per month  (~1 spell / 20mo)
+  stressExitProb: 0.40,        // P(stress → calm) per month  (mean stress ≈ 2.5mo)
+  stressVolMult: 1.8,          // vol multiplier while in stress
+  stressDriftBias: -0.02,      // additive monthly drift drag while in stress
+  stressCorrFloor: 0.85,       // BTC correlation pulled toward this in stress
+  stressSellMult: 1.5,         // sell-pressure multiplier during stress (capitulation)
+};
+
+// ─── Student-t shock (fat tails) ──────────────────────────────────────────────
+// Variance-normalised so the vol sliders still mean "this sigma"; df controls
+// only the tail thickness. df=5 keeps real crash risk without nuking the median.
+function mcRandStudentT(rng, df) {
+  const z = mcRandNormal(rng);
+  let w = 0;
+  for (let i = 0; i < df; i++) { const g = mcRandNormal(rng); w += g * g; }
+  const t = z / Math.sqrt(w / df);
+  return df > 2 ? t * Math.sqrt((df - 2) / df) : t;
+}
+
+// ─── Shared regime path (2-state Markov: calm / stress) ───────────────────────
+// Drawn once from a dedicated stream and handed to every path, so the 1,000 runs
+// CO-MOVE through one market instead of being 1,000 independent worlds.
+function mcBuildRegimePath(months, seed = 999983) {
+  const C = ASSUMED_COEFFS;
+  const rng = mcMulberry32(seed);
+  const path = [];
+  let stressed = false;
+  for (let mo = 0; mo <= months; mo++) {
+    if (mo > 0) {
+      const u = rng();
+      stressed = stressed ? u > C.stressExitProb : u < C.stressEntryProb;
+    }
+    path.push(stressed);
+  }
+  return path;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SIMULATION · Rev 3 ("structural")
+// Same public signature as Rev 2 plus an optional shared regimePath (3rd arg).
+// Changes vs Rev 2:
+//   • FIXED slippage: Rev 2's sellUSD/(2·liq) produced ~39%/month impact and
+//     collapsed the base case to a ~95% drawdown regardless of BTC. Now a
+//     saturating impact k/(1+k) — concave, bounded, responsive to inputs.
+//   • Student-t shocks (fat tails) on both BTC and idiosyncratic components.
+//   • Regime switching: stress raises vol, pulls correlation→0.85, thins
+//     liquidity, intensifies selling.
+//   • Honest R4: AUKI's vesting cliffs are all in the past, so no fake forward
+//     cliff spike — selling instead intensifies during stress regimes.
+// Everything else (PRNG, normal draw, logistic caps, wallet elasticities,
+// asymptotic 5B mint floor, USD-denominated burns) is preserved from Rev 2.
+// ════════════════════════════════════════════════════════════════════════════
+function mcRunSim(p, seed, regimePath) {
+  const C = ASSUMED_COEFFS;
   const rng = mcMulberry32(seed);
   const mFromTGE = Math.round((Date.now() - MC_TGE_DATE.getTime()) / (30.44 * 864e5));
   const data = [];
@@ -1005,115 +1069,112 @@ function mcRunSim(p, seed) {
   let cumulBurned = TOTAL_SUPPLY - 9_990_593_505;
   let rewardPool = 50_000_000;
 
-  // Derived starting state
   let liquidityDepth = p.liquidityDepth;
   let networkEconActivity = p.networkEconActivity;
   let dexDailyVolume = p.dexDailyVolume;
   let activeWallets = 12000;
   const monthlyVol30d = (p.volatility30d / 100);
 
+  // private regime path if none injected (keeps the fn usable standalone)
+  let localRegime = null;
+  if (!regimePath) {
+    localRegime = [];
+    let st = false;
+    for (let mo = 0; mo <= p.months; mo++) {
+      if (mo > 0) { const u = rng(); st = st ? u > C.stressExitProb : u < C.stressEntryProb; }
+      localRegime.push(st);
+    }
+  }
+  const inStress = (mo) => (regimePath ? regimePath[mo] : localRegime[mo]);
+
   for (let mo = 0; mo <= p.months; mo++) {
     const gm = mFromTGE + mo;
     const newUnlocks = mo === 0 ? 0 : mcGetNewUnlocks(gm);
     const totalVested = mcGetVestedAtMonth(gm);
+    const stressed = inStress(mo);
 
-    // ─── Var 6: Network Usage Growth — LOGISTIC (Fix #4) ───
-    // Growth rate decays as activity approaches carrying capacity K
     if (mo > 0) {
       const logisticRate = (p.networkUsageGrowth / 100) * (1 - networkEconActivity / MC_K_ACTIVITY);
       networkEconActivity *= (1 + Math.max(0, logisticRate));
-    }
-
-    // ─── Var 7: Active Wallet Growth — LOGISTIC (Fix #4) ───
-    if (mo > 0) {
       const walletRate = (p.activeWalletGrowth / 100) * (1 - activeWallets / MC_K_WALLETS);
       activeWallets *= (1 + Math.max(0, walletRate));
     }
 
-    // ─── Wallet multipliers — SEPARATE ELASTICITIES (Fix #5) ───
     const wRatio = activeWallets / 12000;
     const burnMult = Math.pow(wRatio, MC_BURN_WALLET_ELASTICITY);
     const liquidityMult = Math.pow(wRatio, MC_LIQUIDITY_WALLET_ELASTICITY);
     const stakingMult = Math.pow(wRatio, MC_STAKING_WALLET_ELASTICITY);
 
-    // ─── Burns with BURN EFFICIENCY (Fix #2) ───
     const burnUsd = networkEconActivity * burnMult * p.burnEfficiency;
     const tokensBurned = price > 0 ? burnUsd / price : 0;
 
-    // ─── Deflationary mint (asymptotic toward 5B floor) ───
     const supplyRatio = Math.max(0, (totalSupply - MC_DEFLATION_FLOOR) / (TOTAL_SUPPLY - MC_DEFLATION_FLOOR));
     const mintRatio = 1 - supplyRatio;
     const tokensMinted = tokensBurned * mintRatio;
-
     if (mo > 0) {
       totalSupply = Math.max(MC_DEFLATION_FLOOR, totalSupply - tokensBurned + tokensMinted);
       cumulBurned += tokensBurned - tokensMinted;
     }
 
-    // ─── Reward pool ───
     const taxTokens = tokensMinted * 0.05;
     rewardPool += tokensMinted - taxTokens;
     const operatorClaims = rewardPool * 0.08;
     rewardPool = Math.max(0, rewardPool - operatorClaims);
 
-    // ─── Treasury ───
     const foundAlloc = MC_ALLOCATIONS.find((a) => a.name === "Foundation");
     const foundVested = mcGetVestedAtMonth(gm) - mcGetVestedAtMonth(0);
     const treasuryBalance = (foundAlloc ? (foundAlloc.tokens / TOTAL_SUPPLY) * foundVested : 0) * price + taxTokens * price;
 
-    // ─── Staking — uses staking-specific elasticity (Fix #5) ───
-    const stakingBase = 0.12;
-    const stakedTokens = totalVested * stakingBase * stakingMult * Math.min(2, 1 + mo * 0.01);
+    const stakedTokens = totalVested * 0.12 * stakingMult * Math.min(2, 1 + mo * 0.01);
 
-    // ─── Var 5: Unlock Sell Pressure ───
-    const sellTokens = newUnlocks * (p.unlockSellPressure / 100);
+    // R4: base sell schedule × regime capitulation multiplier
+    const regimeSellMult = stressed ? C.stressSellMult : 1.0;
+    const sellTokens = newUnlocks * (p.unlockSellPressure / 100) * regimeSellMult;
     const sellImpactUsd = sellTokens * price;
 
-    // ─── Var 1: CEX Coverage Score ───
     const cexVolMult = 1 + (p.cexCoverageScore - 1) * 0.4;
     const cexLiqBoost = 1 + (p.cexCoverageScore - 1) * 0.25;
-
-    // ─── Var 2 & 3: DEX Volume & Liquidity Depth — uses liquidity elasticity (Fix #5) ───
     if (mo > 0) {
       const volLogistic = (p.networkUsageGrowth / 200) * (1 - networkEconActivity / MC_K_ACTIVITY);
       dexDailyVolume *= (1 + Math.max(0, volLogistic));
       liquidityDepth = p.liquidityDepth * (price / p.startPrice) * cexLiqBoost * liquidityMult;
     }
-    const effectiveLiquidity = liquidityDepth * cexLiqBoost;
+    const stressLiqDrain = stressed ? 0.75 : 1.0;
+    const effectiveLiquidity = liquidityDepth * cexLiqBoost * stressLiqDrain;
 
-    // ─── Slippage ───
-    const slippage = sellImpactUsd > 0 && effectiveLiquidity > 0
-      ? sellImpactUsd / (effectiveLiquidity * 2)
-      : 0;
+    // ─── Slippage / price impact (FIXED — Rev 2 was unbounded linear) ───
+    // Saturating concave impact: ~linear for small sells, asymptotes below 1 for
+    // huge ones. DEPTH_FACTOR reflects that monthly flow spreads beyond the ±2%
+    // band rather than hitting it all at once.
+    const DEPTH_FACTOR = 6;
+    const rawImpact = effectiveLiquidity > 0 ? sellImpactUsd / (DEPTH_FACTOR * effectiveLiquidity) : 0;
+    const slippage = rawImpact > 0 ? rawImpact / (1 + rawImpact) : 0;
 
-    // ─── Circulating supply & float signal — STAKING FEEDS PRICE (Fix #3) ───
     const effCirc = Math.max(0, totalVested - stakedTokens - cumulBurned);
     const floatRatio = totalSupply > 0 ? effCirc / totalSupply : 1;
-    const floatSignal = (1 - floatRatio) * 0.02; // scarcity premium from locked supply
+    const floatSignal = (1 - floatRatio) * C.floatSignalCoeff;
+    const imbalanceDrift = (p.buySellImbalance - 1) * C.imbalanceDriftCoeff;
 
-    // ─── Var 8: Buy/Sell Imbalance ───
-    const imbalanceDrift = (p.buySellImbalance - 1) * 0.03;
+    // regime-adjusted market params
+    const effCorr = stressed
+      ? p.btcCorrelation + (C.stressCorrFloor - p.btcCorrelation) * 0.7
+      : p.btcCorrelation;
+    const volMultiplier = stressed ? C.stressVolMult : 1.0;
+    const driftBias = stressed ? C.stressDriftBias : 0;
 
-    // ─── Var 12: BTC — user-adjustable return (Fix #6) ───
     const btcMoReturn = p.btcAnnualReturn / 12;
-    const btcAnnualVol = 0.65;
-    const btcMoVol = btcAnnualVol / Math.sqrt(12);
-    const btcShock = btcMoReturn + btcMoVol * mcRandNormal(rng);
+    const btcMoVol = (C.btcAnnualVol / Math.sqrt(12)) * volMultiplier;
+    const btcShock = btcMoReturn + btcMoVol * mcRandStudentT(rng, C.tDegreesFreedom);
+    const moVol = monthlyVol30d * Math.sqrt(30) / Math.sqrt(12) * volMultiplier;
 
-    // ─── Var 10: 30-Day Volatility ───
-    const moVol = monthlyVol30d * Math.sqrt(30) / Math.sqrt(12);
-
-    // ─── Price evolution — DOCUMENTED COEFFICIENTS (Fixes #1, #3) ───
     if (mo > 0) {
-      // Fix #1: supplyElasticity replaces hardcoded 0.5
       const burnBoost = tokensBurned > 0 ? (tokensBurned / totalSupply) * p.supplyElasticity : 0;
-      const totalVolume = (dexDailyVolume * 30 + dexDailyVolume * 30 * (cexVolMult - 1));
-      const volumeSignal = totalVolume > 0 ? Math.log(totalVolume / 50000) * 0.003 : 0;
+      const totalVolume = dexDailyVolume * 30 * cexVolMult;
+      const volumeSignal = totalVolume > 0 ? Math.log(totalVolume / 50000) * C.volumeSignalCoeff : 0;
 
-      // Fix #3: floatSignal closes the staking → price feedback loop
-      const drift = imbalanceDrift + burnBoost + volumeSignal + floatSignal;
-      const btcComponent = p.btcCorrelation * btcShock;
-      const idioComponent = (1 - p.btcCorrelation) * moVol * mcRandNormal(rng);
+      const drift = imbalanceDrift + burnBoost + volumeSignal + floatSignal + driftBias;
+      const btcComponent = effCorr * btcShock;
+      const idioComponent = (1 - effCorr) * moVol * mcRandStudentT(rng, C.tDegreesFreedom);
 
       price = price * Math.exp(drift + btcComponent + idioComponent - slippage);
       price = Math.max(price, 0.0001);
@@ -1130,14 +1191,17 @@ function mcRunSim(p, seed) {
       dexDailyVolume, activeWallets, networkEconActivity,
       nodeROI: rewardPerNode > 0 ? ((rewardPerNode - 50) / 50) * 100 : -100,
       monthlyRewardPerNode: rewardPerNode,
+      regimeStress: stressed ? 1 : 0,
+      regimeSellMult,
     });
   }
   return data;
 }
 
 function mcRunAll(p, n) {
+  const regimePath = mcBuildRegimePath(p.months);
   const results = [];
-  for (let i = 0; i < n; i++) results.push(mcRunSim(p, i + 1));
+  for (let i = 0; i < n; i++) results.push(mcRunSim(p, i + 1, regimePath));
   return results;
 }
 
@@ -1147,7 +1211,93 @@ function mcPercentiles(sims, field, idx) {
   return { p5: p(5), p10: p(10), p25: p(25), p50: p(50), p75: p(75), p90: p(90), p95: p(95) };
 }
 
+// Headline frequency WITH a 95% binomial confidence interval, so the "% of
+// scenarios up" number stops looking like a calibrated market probability.
+function mcFreqWithError(sims, months, startPrice, multiple = 1) {
+  const N = sims.length;
+  const k = sims.filter((s) => (s[months]?.price ?? 0) > startPrice * multiple).length;
+  const phat = k / N;
+  const se = Math.sqrt((phat * (1 - phat)) / N) * 100;
+  return { pct: phat * 100, sePts: se, ciLow: phat * 100 - 1.96 * se, ciHigh: phat * 100 + 1.96 * se };
+}
+
 // ─── MC UI Components ─────────────────────────────────────────────────────────
+
+// Confidence-interval bar for the headline frequency
+function MCCIBar({ pct, ciLow, ciHigh }) {
+  const clamp = (x) => Math.max(0, Math.min(100, x));
+  const lo = clamp(ciLow), hi = clamp(ciHigh), mid = clamp(pct);
+  return (
+    <div style={{ position: "relative", height: 28, marginTop: 8 }}>
+      <div style={{ position: "absolute", top: 12, left: 0, right: 0, height: 4, background: "#1E1E1E", borderRadius: 2 }} />
+      <div style={{ position: "absolute", top: 12, left: `${lo}%`, width: `${Math.max(0.5, hi - lo)}%`, height: 4, background: `${MC.gold}55`, borderRadius: 2 }} />
+      <div style={{ position: "absolute", top: 7, left: `calc(${mid}% - 1px)`, width: 2, height: 14, background: MC.gold }} />
+      <div style={{ position: "absolute", top: 0, left: 0, fontSize: 9, color: MC.dim, ...M }}>0%</div>
+      <div style={{ position: "absolute", top: 0, right: 0, fontSize: 9, color: MC.dim, ...M }}>100%</div>
+    </div>
+  );
+}
+
+// Model diagnostics + uncertainty — foregrounds the epistemics (Rev 3)
+function MCDiagnostics({ sims, months, startPrice }) {
+  if (!sims || !sims.length) return null;
+  const up = mcFreqWithError(sims, months, startPrice, 1);
+  const x2 = mcFreqWithError(sims, months, startPrice, 2);
+  const half = mcFreqWithError(sims, months, startPrice * 0.5, 1);
+  const horizonStressMonths = sims[0] ? sims[0].filter((d) => d.regimeStress === 1).length : 0;
+  const stressPct = sims[0] && sims[0].length > 1 ? (horizonStressMonths / (sims[0].length - 1)) * 100 : 0;
+  const C = ASSUMED_COEFFS;
+  const coeffRows = [
+    ["Imbalance drift", C.imbalanceDriftCoeff, "per unit buy/sell ratio"],
+    ["Volume signal", C.volumeSignalCoeff, "per log-unit vs $50K"],
+    ["Float signal", C.floatSignalCoeff, "scarcity premium per unit locked"],
+    ["BTC annual vol", C.btcAnnualVol, "historical realised, not AUKI-specific"],
+    ["Tail thickness (t df)", C.tDegreesFreedom, "df=5 → fat but finite kurtosis"],
+    ["Stress entry / mo", C.stressEntryProb, "Markov calm→stress probability"],
+    ["Stress vol mult", C.stressVolMult, "vol scaling inside stress regime"],
+  ];
+  return (
+    <div style={{ background: MC.card, border: `1px solid ${MC.cardBorder}`, borderRadius: 10, padding: "18px 22px", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, borderBottom: `1px solid ${MC.border}`, paddingBottom: 10 }}>
+        <div style={{ fontSize: 14, color: MC.subtle, letterSpacing: "0.1em", fontWeight: 700, ...M }}>0 · MODEL DIAGNOSTICS & UNCERTAINTY</div>
+        <span style={{ fontSize: 10, color: MC.gold, border: `1px solid ${MC.gold}55`, borderRadius: 4, padding: "2px 8px", ...M }}>REV 3 · STRUCTURAL</span>
+      </div>
+
+      <div style={{ background: "#0D1117", border: `1px solid ${MC.cardBorder}`, borderRadius: 8, padding: "14px 16px", marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: MC.muted, ...M, lineHeight: 1.6 }}>
+          <strong style={{ color: MC.text }}>{up.pct.toFixed(1)}%</strong> of {sims.length.toLocaleString()} modelled scenarios end above
+          today's price — but that figure carries sampling error. The true value (given these assumptions)
+          lies in <strong style={{ color: MC.gold }}>{up.ciLow.toFixed(1)}%–{up.ciHigh.toFixed(1)}%</strong> with
+          95% confidence. This is a <em>scenario frequency under stated assumptions</em>, not a market probability.
+        </div>
+        <MCCIBar pct={up.pct} ciLow={up.ciLow} ciHigh={up.ciHigh} />
+        <div style={{ display: "flex", gap: 22, marginTop: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 11, color: MC.muted, ...M }}>≥2x: <strong style={{ color: MC.green }}>{x2.pct.toFixed(1)}%</strong> <span style={{ color: MC.dim }}>±{(1.96 * x2.sePts).toFixed(1)}pts</span></span>
+          <span style={{ fontSize: 11, color: MC.muted, ...M }}>≥50% drawdown: <strong style={{ color: MC.red }}>{half.pct.toFixed(1)}%</strong> <span style={{ color: MC.dim }}>±{(1.96 * half.sePts).toFixed(1)}pts</span></span>
+          <span style={{ fontSize: 11, color: MC.muted, ...M }}>horizon in stress regime: <strong style={{ color: MC.gold }}>{stressPct.toFixed(0)}%</strong> <span style={{ color: MC.dim }}>({horizonStressMonths}mo)</span></span>
+        </div>
+      </div>
+
+      <div style={{ background: "#0D1117", border: `1px solid ${MC.cardBorder}`, borderRadius: 8, padding: "14px 16px" }}>
+        <div style={{ fontSize: 11, color: MC.red, letterSpacing: "0.08em", ...M, marginBottom: 8, fontWeight: 700 }}>⚠ ASSUMED — NOT CALIBRATED TO AUKI DATA</div>
+        <div style={{ fontSize: 10.5, color: MC.muted, ...M, lineHeight: 1.6, marginBottom: 10 }}>
+          AUKI has &lt;2 years of thin price history — not enough to fit these. They are chosen for reasonable
+          magnitude and directional logic. Treat the model as a transparent assumption engine, not a forecast.
+          Move the sliders; watch how much the output depends on these choices.
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "4px 16px" }}>
+          {coeffRows.map(([label, val, note]) => (
+            <div key={label} style={{ display: "contents" }}>
+              <div style={{ fontSize: 10.5, color: MC.subtle, ...M }}>{label} <span style={{ color: MC.dim }}>· {note}</span></div>
+              <div style={{ fontSize: 10.5, color: MC.gold, ...M, textAlign: "right", fontWeight: 600 }}>{val}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MCFanChart({ sims, field, label, formatter, height = 140, color = MC.gold, showZero = false }) {
   if (!sims || !sims.length || !sims[0]) return null;
   const months = sims[0].length; const W = 800; const H = height;
@@ -1268,24 +1418,60 @@ function mcSummary(sims, months, startPrice) {
 }
 
 // ─── Web Worker hook for non-blocking simulation ──────────────────────────────
+// Rev 3: the worker is now built INLINE from a Blob, so the simulation engine
+// lives entirely in this file. This removes the separate /mcWorker.js (which had
+// its own copy of the engine and could silently drift out of sync) — there is now
+// a single source of truth for the model. The worker body stringifies the engine
+// functions and runs mcRunAll off the main thread, exactly as before.
+const MC_WORKER_SRC = `
+${mcMulberry32.toString()}
+${mcRandNormal.toString()}
+${mcRandStudentT.toString()}
+${mcBuildRegimePath.toString()}
+${mcGetVestedAtMonth.toString()}
+${mcGetNewUnlocks.toString()}
+${mcRunSim.toString()}
+${mcRunAll.toString()}
+const TOTAL_SUPPLY = ${TOTAL_SUPPLY};
+const MC_DEFLATION_FLOOR = ${MC_DEFLATION_FLOOR};
+const MC_TGE_DATE = new Date(${JSON.stringify(MC_TGE_DATE.toISOString())});
+const MC_K_ACTIVITY = ${MC_K_ACTIVITY};
+const MC_K_WALLETS = ${MC_K_WALLETS};
+const MC_BURN_WALLET_ELASTICITY = ${MC_BURN_WALLET_ELASTICITY};
+const MC_LIQUIDITY_WALLET_ELASTICITY = ${MC_LIQUIDITY_WALLET_ELASTICITY};
+const MC_STAKING_WALLET_ELASTICITY = ${MC_STAKING_WALLET_ELASTICITY};
+const MC_ALLOCATIONS = ${JSON.stringify(MC_ALLOCATIONS)};
+const ASSUMED_COEFFS = ${JSON.stringify(ASSUMED_COEFFS)};
+self.onmessage = (e) => {
+  const { params, numSims } = e.data;
+  try { self.postMessage(mcRunAll(params, numSims)); }
+  catch (err) { self.postMessage([]); }
+};
+`;
+
 function useMCWorker(params, numSims) {
   const [sims, setSims] = useState(null);
   const [running, setRunning] = useState(false);
   const workerRef = useRef(null);
+  const urlRef = useRef(null);
   useEffect(() => {
     setRunning(true);
     if (workerRef.current) workerRef.current.terminate();
-    const worker = new Worker("/mcWorker.js");
+    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    const blob = new Blob([MC_WORKER_SRC], { type: "application/javascript" });
+    const url = URL.createObjectURL(blob);
+    urlRef.current = url;
+    const worker = new Worker(url);
     workerRef.current = worker;
     worker.onmessage = (e) => { setSims(e.data); setRunning(false); };
     worker.onerror = () => { setRunning(false); };
     worker.postMessage({ params, numSims });
-    return () => worker.terminate();
+    return () => { worker.terminate(); URL.revokeObjectURL(url); };
   }, [JSON.stringify(params), numSims]);
   return { sims, running };
 }
 
-// ─── Monte Carlo Tab (13 variables · Rev 2) ──────────────────────────────────
+// ─── Monte Carlo Tab (13 variables · Rev 3 · structural) ─────────────────────
 function MonteCarloTab({ price: livePrice }) {
   const FALLBACK_PRICE = 0.00929; // keep in sync with fetchAukiPrice fallback
   const startPrice = livePrice || FALLBACK_PRICE;
@@ -1335,7 +1521,6 @@ function MonteCarloTab({ price: livePrice }) {
 
   // Deflation timeline
   const deflationTimeline = useMemo(() => {
-    if (!sims) return [];
     return [9e9, 8e9, 7.5e9, 7e9, 6e9, 5.5e9, 5e9].map((target) => {
       const arr = sims.map((s) => { const i = s.findIndex((d) => d.totalSupply <= target); return i >= 0 ? i : Infinity; }).sort((a, b) => a - b);
       const med = arr[Math.floor(arr.length / 2)];
@@ -1478,6 +1663,9 @@ function MonteCarloTab({ price: livePrice }) {
           </div>
         </div>
       </div>
+
+      {/* ─── 0. Model Diagnostics & Uncertainty (Rev 3) ─────────────── */}
+      <MCDiagnostics sims={sims} months={months} startPrice={startPrice} />
 
       {/* ─── 1. Price Trajectories ──────────────────────────────────── */}
       <MCSection title="1 · PRICE TRAJECTORIES" explanation="Range of possible AUKI prices over time. Solid line = median (50th percentile). Shaded bands = 25th–75th and 5th–95th percentile ranges. Wider bands = more uncertainty.">

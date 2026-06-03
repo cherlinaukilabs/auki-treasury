@@ -1417,57 +1417,37 @@ function mcSummary(sims, months, startPrice) {
   };
 }
 
-// ─── Web Worker hook for non-blocking simulation ──────────────────────────────
-// Rev 3: the worker is now built INLINE from a Blob, so the simulation engine
-// lives entirely in this file. This removes the separate /mcWorker.js (which had
-// its own copy of the engine and could silently drift out of sync) — there is now
-// a single source of truth for the model. The worker body stringifies the engine
-// functions and runs mcRunAll off the main thread, exactly as before.
-const MC_WORKER_SRC = `
-${mcMulberry32.toString()}
-${mcRandNormal.toString()}
-${mcRandStudentT.toString()}
-${mcBuildRegimePath.toString()}
-${mcGetVestedAtMonth.toString()}
-${mcGetNewUnlocks.toString()}
-${mcRunSim.toString()}
-${mcRunAll.toString()}
-const TOTAL_SUPPLY = ${TOTAL_SUPPLY};
-const MC_DEFLATION_FLOOR = ${MC_DEFLATION_FLOOR};
-const MC_TGE_DATE = new Date(${JSON.stringify(MC_TGE_DATE.toISOString())});
-const MC_K_ACTIVITY = ${MC_K_ACTIVITY};
-const MC_K_WALLETS = ${MC_K_WALLETS};
-const MC_BURN_WALLET_ELASTICITY = ${MC_BURN_WALLET_ELASTICITY};
-const MC_LIQUIDITY_WALLET_ELASTICITY = ${MC_LIQUIDITY_WALLET_ELASTICITY};
-const MC_STAKING_WALLET_ELASTICITY = ${MC_STAKING_WALLET_ELASTICITY};
-const MC_ALLOCATIONS = ${JSON.stringify(MC_ALLOCATIONS)};
-const ASSUMED_COEFFS = ${JSON.stringify(ASSUMED_COEFFS)};
-self.onmessage = (e) => {
-  const { params, numSims } = e.data;
-  try { self.postMessage(mcRunAll(params, numSims)); }
-  catch (err) { self.postMessage([]); }
-};
-`;
-
+// ─── Simulation hook (main-thread, no Web Worker) ─────────────────────────────
+// The engine runs 1,000 paths in well under a second, so it executes directly on
+// the main thread. This deliberately avoids Web Workers entirely: bundling a
+// worker (whether as a separate file or an inline Blob) is the fragile part under
+// a production build, and it is not worth the risk for a sub-second computation.
+// A short deferral via requestAnimationFrame lets the loading state paint first
+// so the UI never appears frozen.
 function useMCWorker(params, numSims) {
   const [sims, setSims] = useState(null);
   const [running, setRunning] = useState(false);
-  const workerRef = useRef(null);
-  const urlRef = useRef(null);
+  const paramKey = JSON.stringify(params);
   useEffect(() => {
+    let cancelled = false;
     setRunning(true);
-    if (workerRef.current) workerRef.current.terminate();
-    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-    const blob = new Blob([MC_WORKER_SRC], { type: "application/javascript" });
-    const url = URL.createObjectURL(blob);
-    urlRef.current = url;
-    const worker = new Worker(url);
-    workerRef.current = worker;
-    worker.onmessage = (e) => { setSims(e.data); setRunning(false); };
-    worker.onerror = () => { setRunning(false); };
-    worker.postMessage({ params, numSims });
-    return () => { worker.terminate(); URL.revokeObjectURL(url); };
-  }, [JSON.stringify(params), numSims]);
+    setSims(null);
+    // Defer to the next frame(s) so the "RUNNING SIMULATION…" loader can render
+    // before the synchronous compute blocks the thread briefly.
+    const id = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        let result;
+        try {
+          result = mcRunAll(params, numSims);
+        } catch (err) {
+          result = [];
+        }
+        if (!cancelled) { setSims(result); setRunning(false); }
+      });
+    });
+    return () => { cancelled = true; cancelAnimationFrame(id); };
+  }, [paramKey, numSims]);
   return { sims, running };
 }
 

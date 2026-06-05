@@ -1072,6 +1072,33 @@ function mcBuildRegimePath(months, seed = 999983) {
 // Everything else (PRNG, normal draw, logistic caps, wallet elasticities,
 // asymptotic 5B mint floor, USD-denominated burns) is preserved from Rev 2.
 // ════════════════════════════════════════════════════════════════════════════
+// ─── Ecosystem flows (Stage 1) — adoption inputs → monthly dollar flows ───────
+// Paper-grounded; all inputs default to zero (today's reality) ⇒ all flows zero,
+// so the price engine reduces exactly to the calibrated sell-side engine.
+const MC_ECO = {
+  servicePricePerDAU: 0.01, stakePerNodeUsd: 200, rewardPoolMintShare: 0.50,
+  operatorCostPerDay: 0.86,
+};
+function mcEcosystemFlows(inp) {
+  const monthlyRevenueUsd = inp.monthlyRevenueUsd || 0;
+  const diversionPct = inp.diversionPct || 0;
+  const dau = inp.dau || 0;
+  const decentralizedNodes = inp.decentralizedNodes || 0;
+  const tokensMintedThisMonth = inp.tokensMintedThisMonth || 0;
+  const predictiveStakeUsd = inp.predictiveStakeUsd || 0;
+
+  const buybackUsd = monthlyRevenueUsd * (diversionPct / 100);
+  const creditBurnUsd = dau * MC_ECO.servicePricePerDAU * 30.44;
+  const operatorStakeLockUsd = decentralizedNodes * MC_ECO.stakePerNodeUsd;
+  const operatorRewardsUsd = tokensMintedThisMonth * MC_ECO.rewardPoolMintShare;
+  const operatorCostUsd = decentralizedNodes * MC_ECO.operatorCostPerDay * 30.44;
+  const operatorSellUsd = Math.min(Math.max(operatorCostUsd, 0), Math.max(operatorRewardsUsd, 0));
+  return {
+    buybackUsd, creditBurnUsd, operatorStakeLockUsd, operatorSellUsd,
+    totalFloatLockUsd: operatorStakeLockUsd + predictiveStakeUsd,
+  };
+}
+
 function mcRunSim(p, seed, regimePath) {
   const C = ASSUMED_COEFFS;
   const rng = mcMulberry32(seed);
@@ -1145,6 +1172,30 @@ function mcRunSim(p, seed, regimePath) {
     const sellTokens = newUnlocks * (p.unlockSellPressure / 100) * regimeSellMult;
     const sellImpactUsd = sellTokens * price;
 
+    // ─── Open-market buyback + operator flows (fed by the ecosystem engine) ───
+    // The buy-side flow comes from revenue diverted to open-market buys; operator
+    // selling (to cover node costs) is a competing sell flow. Both are computed by
+    // the ecosystem engine (Stage 1). IMPORTANT (spec §2.1): the buy-side IMPACT
+    // MAGNITUDE is ASSUMED SYMMETRIC with the sell side and is NOT supported by
+    // data — the backtest validates the sell-dominated downside only. The buy-side
+    // multiplier is therefore an explicit belief input (buySideImpact), default 1.0,
+    // destined for the belief surface (Stage 6), not a calibrated constant.
+    // All ecosystem inputs default to zero ⇒ flows zero ⇒ engine reduces EXACTLY to
+    // the calibrated sell-side engine (regression gate, spec §7.4).
+    const eco = mcEcosystemFlows({
+      monthlyRevenueUsd: p.monthlyRevenueUsd || 0,
+      diversionPct: p.diversionPct || 0,
+      dau: p.ecoDau || 0,
+      decentralizedNodes: p.ecoNodes || 0,
+      tokensMintedThisMonth: 0,   // wired to BME mint in a later stage; 0 keeps regression exact
+      predictiveStakeUsd: p.predictiveStakeUsd || 0,
+    });
+    const buySideImpact = (p.buySideImpact == null ? 1.0 : p.buySideImpact); // ASSUMED axis (spec §2.1)
+    // legacy direct lever still honoured (adds to ecosystem buyback)
+    const buybackUsd = (eco.buybackUsd + (p.openMarketBuybackUsd || 0)) * buySideImpact;
+    const operatorSellUsd = eco.operatorSellUsd;
+    const buyTokens = price > 0 ? buybackUsd / price : 0;
+
     const cexVolMult = 1 + (p.cexCoverageScore - 1) * 0.4;
     const cexLiqBoost = 1 + (p.cexCoverageScore - 1) * 0.25;
     if (mo > 0) {
@@ -1173,11 +1224,16 @@ function mcRunSim(p, seed, regimePath) {
     // Regime multiplier R: stress widens everything at once
     const R = stressed ? C.stressVolMult : 1.0;
 
-    // ─── Slippage: amplified multiplicatively by thinness (§3a.1) ───
+    // ─── Net-flow price impact (§3a.1): buy pressure competes with sell pressure ───
+    // against the SAME effective liquidity. Net sell → downward impact (slippage);
+    // net buy → upward impact (buy-side lift). Symmetric, bounded, regime-amplified.
     const DEPTH_FACTOR = 18;  // CALIBRATED: monthly flow spreads ~3x wider than ±2% band; backtested to real AUKI 16mo drawdown
-    const rawImpact = effectiveLiquidity > 0 ? sellImpactUsd / (DEPTH_FACTOR * effectiveLiquidity) : 0;
-    const baseSlippage = rawImpact > 0 ? rawImpact / (1 + rawImpact) : 0;
-    const slippage = Math.min(0.95, baseSlippage * R); // S already in effLiq via rawImpact; R widens; capped
+    const netFlowUsd = sellImpactUsd + operatorSellUsd - buybackUsd;   // >0 = net selling, <0 = net buying
+    const rawNet = effectiveLiquidity > 0 ? netFlowUsd / (DEPTH_FACTOR * effectiveLiquidity) : 0;
+    // saturating concave impact, applied symmetrically around zero
+    const impactMag = Math.abs(rawNet) / (1 + Math.abs(rawNet));
+    const netImpact = Math.sign(rawNet) * impactMag;   // + = price drag (sell), − = lift (buy)
+    const slippage = Math.min(0.95, Math.max(-0.95, netImpact * R)); // R widens; bounded both sides
 
     const effCirc = Math.max(0, totalVested - stakedTokens - cumulBurned);
     const floatRatio = totalSupply > 0 ? effCirc / totalSupply : 1;
@@ -1198,8 +1254,9 @@ function mcRunSim(p, seed, regimePath) {
     // ─── v1.1 §4: maturity-driven fundamentals weight (endogenous crossover) ───
     // maturity rises with network scale IN THIS PATH; fundamentals earn their weight.
     const maturity = Math.min(1, networkEconActivity / MC_K_ACTIVITY);
+    const crossoverGain = (p.crossoverGain == null ? C.crossoverGain : p.crossoverGain); // belief axis
     const wFund = Math.min(1,
-      C.wFund0 + C.crossoverGain * (C.wFundMax - C.wFund0) * maturity
+      C.wFund0 + crossoverGain * (C.wFundMax - C.wFund0) * maturity
     );
     const wDyn = 1 - wFund;
 
@@ -1209,7 +1266,8 @@ function mcRunSim(p, seed, regimePath) {
       const totalVolume = dexDailyVolume * 30 * cexVolMult;
       const volumeSignal = totalVolume > 0 ? Math.log(totalVolume / 50000) * C.volumeSignalCoeff : 0;
       // fundamentals = value creation, weighted by linkage strength (§5 axis) and maturity weight
-      const fFund = (burnBoost + floatSignal + volumeSignal) * C.fundLinkage;
+      const fundLinkage = (p.fundLinkage == null ? C.fundLinkage : p.fundLinkage); // belief axis
+      const fFund = (burnBoost + floatSignal + volumeSignal) * fundLinkage;
 
       // ── DYNAMICS channel (macro weather) — SCALED by structure via g(S) (§3a.1) ──
       const g = 1 + C.betaAmp * (S - 1);            // gentle directional amplification
@@ -1266,6 +1324,30 @@ function mcFreqWithError(sims, months, startPrice, multiple = 1) {
   const phat = k / N;
   const se = Math.sqrt((phat * (1 - phat)) / N) * 100;
   return { pct: phat * 100, sePts: se, ciLow: phat * 100 - 1.96 * se, ciHigh: phat * 100 + 1.96 * se };
+}
+
+// ─── Across-calendar CI (Stage 3, spec §2.2) ─────────────────────────────────
+// The shared single regime calendar means mcFreqWithError's binomial CI captures
+// only WITHIN-calendar sampling noise. The TRUE uncertainty is the spread of the
+// headline frequency ACROSS regime calendars. This resamples the regime seed K
+// times and returns the empirical 2.5–97.5% band — materially wider (measured
+// ~4.8x the within-calendar half-width). Use this for any honest headline.
+function mcFreqAcrossCalendars(p, startPrice, multiple = 1, K = 120, nPer = 400) {
+  const freqs = [];
+  for (let kk = 0; kk < K; kk++) {
+    const rp = mcBuildRegimePath(p.months, 1000 + kk * 7919);
+    let up = 0;
+    for (let i = 0; i < nPer; i++) {
+      const sim = mcRunSim(p, i + 1, rp);
+      if ((sim[p.months]?.price ?? 0) > startPrice * multiple) up++;
+    }
+    freqs.push((up / nPer) * 100);
+  }
+  freqs.sort((a, b) => a - b);
+  const mean = freqs.reduce((a, b) => a + b, 0) / K;
+  const lo = freqs[Math.floor(0.025 * K)];
+  const hi = freqs[Math.floor(0.975 * K)];
+  return { pct: mean, ciLow: lo, ciHigh: hi, acrossCalendar: true };
 }
 
 // ─── MC UI Components ─────────────────────────────────────────────────────────
@@ -1498,6 +1580,153 @@ function useMCWorker(params, numSims) {
   return { sims, running };
 }
 
+// ─── Belief Surface (Stage 6, spec §6 + §4.1) ───────────────────────────────
+// The honest headline: median price across the grid of two UN-CALIBRATABLE belief
+// axes (fundamentals-linkage × buy-side impact), crossover-gain held at a stated
+// value. Shows how much of any result is authored by belief vs. forced by the
+// calibrated mechanics. Computes ON DEMAND (button) — a 5×5 grid × N paths is
+// heavy and must not fire on every slider move. The triple-optimistic corner
+// (both axes maxed) is greyed + labelled as the least-supported region (§4.1).
+const MC_SURFACE_LINKAGE = [0.25, 0.5, 1.0, 1.5, 2.0];
+const MC_SURFACE_BUY = [0.25, 0.5, 1.0, 1.5, 2.0];
+
+function mcSurfaceColor(m) {
+  const t = Math.max(0, Math.min(1, (m - 0.5) / (2.2 - 0.5)));
+  let r, g, b;
+  if (t < 0.5) { r = 200; g = Math.round(60 + t * 2 * 150); b = 40; }
+  else { r = Math.round(200 - (t - 0.5) * 2 * 150); g = 210; b = Math.round(40 + (t - 0.5) * 2 * 60); }
+  return `rgb(${r},${g},${b})`;
+}
+
+function MCBeliefSurface({ baseParams, numSimsPerCell = 600, crossoverGain = 1.0 }) {
+  const [grid, setGrid] = useState(null);
+  const [running, setRunning] = useState(false);
+  const [computedAt, setComputedAt] = useState(null);
+
+  const compute = useCallback(() => {
+    setRunning(true);
+    setGrid(null);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        try {
+          const startP = baseParams.startPrice;
+          const out = [];
+          for (const b of MC_SURFACE_BUY) {
+            const row = [];
+            for (const l of MC_SURFACE_LINKAGE) {
+              const sims = mcRunAll(
+                { ...baseParams, fundLinkage: l, buySideImpact: b, crossoverGain },
+                numSimsPerCell
+              );
+              const p = mcPercentiles(sims, "price", baseParams.months);
+              row.push(p.p50 / startP);
+            }
+            out.push(row);
+          }
+          setGrid(out);
+          setComputedAt(Date.now());
+        } catch (e) {
+          setGrid(null);
+        }
+        setRunning(false);
+      });
+    });
+  }, [baseParams, numSimsPerCell, crossoverGain]);
+
+  const nrow = MC_SURFACE_BUY.length, ncol = MC_SURFACE_LINKAGE.length;
+  const cell = 64, padL = 66, padB = 52, padT = 16, padR = 8;
+  const W = padL + ncol * cell + padR, H = padT + nrow * cell + padB;
+
+  return (
+    <div style={{ background: MC.card, border: `1px solid ${MC.cardBorder}`, borderRadius: 10, padding: 18, marginTop: 18 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
+        <div style={{ maxWidth: 520 }}>
+          <div style={{ color: MC.text, fontSize: 14, fontWeight: 700, letterSpacing: "0.04em" }}>BELIEF SURFACE — MEDIAN PRICE (×START)</div>
+          <div style={{ color: MC.muted, fontSize: 11.5, marginTop: 5, lineHeight: 1.5 }}>
+            How the median outcome moves across the two assumptions no data can pin:
+            fundamentals-linkage strength and buy-side impact. Crossover gain held at {crossoverGain.toFixed(2)}.
+            The spread across this grid is the honest message — much of any result is
+            authored by belief, not forced by the calibrated mechanics.
+          </div>
+        </div>
+        <button
+          onClick={compute}
+          disabled={running}
+          style={{
+            background: running ? MC.veryDim : MC.gold, color: running ? MC.muted : "#111",
+            border: "none", borderRadius: 6, padding: "9px 16px", fontSize: 12, fontWeight: 700,
+            letterSpacing: "0.05em", cursor: running ? "default" : "pointer", whiteSpace: "nowrap",
+          }}
+        >
+          {running ? "COMPUTING…" : grid ? "RECOMPUTE SURFACE" : "COMPUTE SURFACE"}
+        </button>
+      </div>
+
+      {!grid && !running && (
+        <div style={{ color: MC.dim, fontSize: 12, padding: "28px 0", textAlign: "center" }}>
+          Surface is computed on demand (25 cells × {numSimsPerCell} paths). Press “Compute Surface”.
+        </div>
+      )}
+      {running && (
+        <div style={{ color: MC.gold, fontSize: 12, padding: "28px 0", textAlign: "center", letterSpacing: "0.08em" }}>
+          COMPUTING SURFACE — 25 CELLS…
+        </div>
+      )}
+
+      {grid && (
+        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 520, marginTop: 12 }} fontFamily="inherit">
+          {grid.map((row, ri) => {
+            const yrow = nrow - 1 - ri;
+            return row.map((m, ci) => {
+              const x = padL + ci * cell, y = padT + yrow * cell;
+              const isCorner = ri === nrow - 1 && ci === ncol - 1;
+              return (
+                <g key={`${ri}-${ci}`}>
+                  <rect x={x} y={y} width={cell - 3} height={cell - 3} rx={4} fill={mcSurfaceColor(m)} />
+                  {isCorner && (
+                    <>
+                      <rect x={x} y={y} width={cell - 3} height={cell - 3} rx={4} fill="#0d0d0f" opacity={0.62} />
+                      <rect x={x} y={y} width={cell - 3} height={cell - 3} rx={4} fill="none" stroke="#888" strokeDasharray="4 3" />
+                    </>
+                  )}
+                  <text x={x + (cell - 3) / 2} y={y + (cell - 3) / 2 + 4} fill={isCorner ? "#bbb" : "#111"}
+                    fontSize={13} fontWeight={700} textAnchor="middle">{m.toFixed(2)}×</text>
+                </g>
+              );
+            });
+          })}
+          {/* x axis */}
+          {MC_SURFACE_LINKAGE.map((l, ci) => (
+            <text key={`x${ci}`} x={padL + ci * cell + (cell - 3) / 2} y={padT + nrow * cell + 16}
+              fill={MC.muted} fontSize={10} textAnchor="middle">{l.toFixed(2)}</text>
+          ))}
+          <text x={padL + ncol * cell / 2} y={padT + nrow * cell + 36} fill={MC.subtle} fontSize={11}
+            textAnchor="middle" fontWeight={600}>Fundamentals-linkage (assumed)</text>
+          {/* y axis */}
+          {MC_SURFACE_BUY.map((b, ri) => {
+            const yrow = nrow - 1 - ri;
+            return (
+              <text key={`y${ri}`} x={padL - 10} y={padT + yrow * cell + (cell - 3) / 2 + 4}
+                fill={MC.muted} fontSize={10} textAnchor="end">{b.toFixed(2)}</text>
+            );
+          })}
+          <text x={16} y={padT + nrow * cell / 2} fill={MC.subtle} fontSize={11} fontWeight={600}
+            textAnchor="middle" transform={`rotate(-90 16 ${padT + nrow * cell / 2})`}>Buy-side impact (assumed)</text>
+        </svg>
+      )}
+
+      {grid && (
+        <div style={{ color: MC.muted, fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
+          Dashed top-right cell = the triple-optimistic corner (both axes maxed): the
+          most spectacular number and the <b>least-supported</b> — three hopeful
+          assumptions at once. It is shown, not hidden, but greyed so it cannot be
+          mistaken for the headline.
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Monte Carlo Tab (13 variables · Rev 3 · structural) ─────────────────────
 function MonteCarloTab({ price: livePrice }) {
   const FALLBACK_PRICE = 0.00929; // keep in sync with fetchAukiPrice fallback
@@ -1514,6 +1743,7 @@ function MonteCarloTab({ price: livePrice }) {
   // Fundamentals
   const [networkEconActivity, setNetworkEconActivity] = useState(25000);
   const [unlockSellPressure, setUnlockSellPressure] = useState(35);
+  const [openMarketBuybackUsd, setOpenMarketBuybackUsd] = useState(0);  // $/mo revenue-funded open-market buys; 0 = today's reality
   const [networkUsageGrowth, setNetworkUsageGrowth] = useState(8);
   const [activeWalletGrowth, setActiveWalletGrowth] = useState(5);
   // Market Dynamics
@@ -1530,12 +1760,26 @@ function MonteCarloTab({ price: livePrice }) {
   const { sims, running: simRunning } = useMCWorker({
     months, startPrice,
     cexCoverageScore, dexDailyVolume, liquidityDepth,
-    networkEconActivity, unlockSellPressure, networkUsageGrowth,
+    networkEconActivity, unlockSellPressure, openMarketBuybackUsd, networkUsageGrowth,
     activeWalletGrowth, buySellImbalance, btcCorrelation, volatility30d,
     burnEfficiency, btcAnnualReturn, supplyElasticity,
   }, NUM_SIMS);
 
   const summary = useMemo(() => sims ? mcSummary(sims, months, startPrice) : null, [sims, months, startPrice]);
+
+  // Params snapshot for the belief surface (mirrors the live scenario; the surface
+  // overrides the three belief axes itself). Ecosystem inputs default to today (0).
+  const surfaceBaseParams = useMemo(() => ({
+    months, startPrice,
+    cexCoverageScore, dexDailyVolume, liquidityDepth,
+    networkEconActivity, unlockSellPressure, openMarketBuybackUsd, networkUsageGrowth,
+    activeWalletGrowth, buySellImbalance, btcCorrelation, volatility30d,
+    burnEfficiency, btcAnnualReturn, supplyElasticity,
+    monthlyRevenueUsd: 0, diversionPct: 0, ecoDau: 0, ecoNodes: 0,
+  }), [months, startPrice, cexCoverageScore, dexDailyVolume, liquidityDepth,
+    networkEconActivity, unlockSellPressure, openMarketBuybackUsd, networkUsageGrowth,
+    activeWalletGrowth, buySellImbalance, btcCorrelation, volatility30d,
+    burnEfficiency, btcAnnualReturn, supplyElasticity]);
   const medianSim = useMemo(() => {
     if (!sims || !sims.length) return null;
     const p50price = mcPercentiles(sims, "price", months).p50;
@@ -1706,6 +1950,9 @@ function MonteCarloTab({ price: livePrice }) {
         </div>
       </MCSection>
 
+      {/* ─── Belief Surface (Stage 6) — honest headline beside the fan ──── */}
+      <MCBeliefSurface baseParams={surfaceBaseParams} numSimsPerCell={600} crossoverGain={1.0} />
+
       {/* ─── 2. Supply Deflation ───────────────────────────────────── */}
       <MCSection title="2 · SUPPLY DEFLATION" explanation="The burn-credit-mint mechanism destroys tokens when services are used, while minting fewer as rewards. Supply approaches an asymptotic floor of 5B — the closer it gets, the slower deflation becomes.">
         <MCFanChart sims={sims} field="totalSupply" label="TOTAL SUPPLY — TOWARD 5B FLOOR" formatter={mcFmtB} height={160} color={MC.blue} />
@@ -1809,7 +2056,7 @@ function MonteCarloTab({ price: livePrice }) {
 
       {/* ─── Footer ────────────────────────────────────────────────── */}
       <div style={{ textAlign: "center", padding: "20px 0", color: MC.veryDim, fontSize: 11, ...M, letterSpacing: "0.1em" }}>
-        MONTE CARLO · {NUM_SIMS} PATHS · {mcFmtMo(months)} · 13 VARIABLES · SCENARIO SIMULATION · NOT FINANCIAL ADVICE
+        PRICE SENSITIVITY · {NUM_SIMS} PATHS · {mcFmtMo(months)} · 13 VARIABLES · SCENARIO SIMULATION · NOT FINANCIAL ADVICE
       </div>
     </div>
   );
@@ -2210,7 +2457,7 @@ export default function AukiTreasury() {
             ["movements", "MOVEMENT LOG"],
             ["dex", "DEX MARKET ACTIVITY"],
             ["cex", "CEX MARKET ACTIVITY"],
-            ["montecarlo", "MONTE CARLO"],
+            ["montecarlo", "PRICE SENSITIVITY"],
           ].map(([id, lbl]) => (
             <button
               key={id}

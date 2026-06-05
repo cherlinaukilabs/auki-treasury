@@ -1004,15 +1004,28 @@ const ASSUMED_COEFFS = {
   imbalanceDriftCoeff: 0.03,   // per unit of buy/sell ratio
   volumeSignalCoeff: 0.003,    // per log-unit of volume vs $50K baseline
   floatSignalCoeff: 0.02,      // scarcity premium per unit locked
-  btcAnnualVol: 0.65,          // historical BTC realised vol 2020–25
+  btcAnnualVol: 0.44,          // CALIBRATED: BTC realised vol from 500d AUKI-window data
   // — regime model —
-  tDegreesFreedom: 5,          // Student-t df=5 → finite kurtosis, fat but sane
+  tDegreesFreedom: 6,          // CALIBRATED: AUKI kurtosis 4.15 milder than df5; df6 fits better
   stressEntryProb: 0.05,       // P(calm → stress) per month  (~1 spell / 20mo)
   stressExitProb: 0.40,        // P(stress → calm) per month  (mean stress ≈ 2.5mo)
   stressVolMult: 1.8,          // vol multiplier while in stress
   stressDriftBias: -0.02,      // additive monthly drift drag while in stress
   stressCorrFloor: 0.85,       // BTC correlation pulled toward this in stress
   stressSellMult: 1.5,         // sell-pressure multiplier during stress (capitulation)
+  // ── v1.1 structural redesign — UNCALIBRATED, illustrative defaults ──
+  // Structure (liquidity) is now a MULTIPLIER on dynamics+noise+slippage, not an
+  // additive drift term (§3, §3a.1). These govern how hard moves land.
+  refLiquidity: 580000,        // reference depth; S = refLiquidity / effLiq
+  S_MAX: 8,                    // §3a.3 hard cap on structure multiplier (anti-detonation)
+  betaAmp: 0.5,                // §3a.1 gentle directional amplification (g = 1 + betaAmp·(S−1))
+  liqFloorFrac: 0.20,          // §3a.2 effLiq can thin to 20% of base, never zero
+  liqPriceCoupling: 0.5,       // §3a.2 k<1: liquidity follows price sub-linearly
+  // Maturity crossover (§4) — fundamentals weight rises as the network scales
+  wFund0: 0.25,                // illustrative starting fundamentals weight (altcoin → dynamics-led)
+  wFundMax: 0.75,              // max fundamentals weight at full maturity
+  crossoverGain: 1.0,          // §5 belief dial — the surface axis; 1.0 = neutral
+  fundLinkage: 1.0,            // §5 fundamentals-linkage strength — the other surface axis
 };
 
 // ─── Student-t shock (fat tails) ──────────────────────────────────────────────
@@ -1137,46 +1150,78 @@ function mcRunSim(p, seed, regimePath) {
     if (mo > 0) {
       const volLogistic = (p.networkUsageGrowth / 200) * (1 - networkEconActivity / MC_K_ACTIVITY);
       dexDailyVolume *= (1 + Math.max(0, volLogistic));
-      liquidityDepth = p.liquidityDepth * (price / p.startPrice) * cexLiqBoost * liquidityMult;
     }
-    const stressLiqDrain = stressed ? 0.75 : 1.0;
-    const effectiveLiquidity = liquidityDepth * cexLiqBoost * stressLiqDrain;
 
-    // ─── Slippage / price impact (FIXED — Rev 2 was unbounded linear) ───
-    // Saturating concave impact: ~linear for small sells, asymptotes below 1 for
-    // huge ones. DEPTH_FACTOR reflects that monthly flow spreads beyond the ±2%
-    // band rather than hitting it all at once.
-    const DEPTH_FACTOR = 6;
+    // ─── v1.1 §3a.2: effectiveLiquidity COUPLED to price + stress, damped & floored ───
+    // Base depth grows with CEX coverage and wallet base (exogenous trend), then is
+    // coupled to price sub-linearly (k<1) with a hard floor so the downside loop
+    // (price↓ → liquidity↓ → amplification↑ → bigger↓) is realistic but can't spiral.
+    const baseLiq = p.liquidityDepth * cexLiqBoost * liquidityMult;
+    const priceCoupling = Math.max(
+      C.liqFloorFrac,
+      Math.pow(price / p.startPrice, C.liqPriceCoupling)
+    );
+    const stressLiqDrain = stressed ? 0.75 : 1.0;
+    const effectiveLiquidity = baseLiq * priceCoupling * stressLiqDrain;
+
+    // ─── v1.1 §3, §3a.3: Structure multiplier S — thin amplifies, deep dampens; BOUNDED ───
+    const concentrationFactor = 1.0; // placeholder hook for §3a holder-concentration (not yet built)
+    const S = Math.min(
+      C.S_MAX,
+      effectiveLiquidity > 0 ? (C.refLiquidity / effectiveLiquidity) * concentrationFactor : C.S_MAX
+    );
+    // Regime multiplier R: stress widens everything at once
+    const R = stressed ? C.stressVolMult : 1.0;
+
+    // ─── Slippage: amplified multiplicatively by thinness (§3a.1) ───
+    const DEPTH_FACTOR = 18;  // CALIBRATED: monthly flow spreads ~3x wider than ±2% band; backtested to real AUKI 16mo drawdown
     const rawImpact = effectiveLiquidity > 0 ? sellImpactUsd / (DEPTH_FACTOR * effectiveLiquidity) : 0;
-    const slippage = rawImpact > 0 ? rawImpact / (1 + rawImpact) : 0;
+    const baseSlippage = rawImpact > 0 ? rawImpact / (1 + rawImpact) : 0;
+    const slippage = Math.min(0.95, baseSlippage * R); // S already in effLiq via rawImpact; R widens; capped
 
     const effCirc = Math.max(0, totalVested - stakedTokens - cumulBurned);
     const floatRatio = totalSupply > 0 ? effCirc / totalSupply : 1;
     const floatSignal = (1 - floatRatio) * C.floatSignalCoeff;
     const imbalanceDrift = (p.buySellImbalance - 1) * C.imbalanceDriftCoeff;
 
-    // regime-adjusted market params
+    // regime-adjusted correlation
     const effCorr = stressed
       ? p.btcCorrelation + (C.stressCorrFloor - p.btcCorrelation) * 0.7
       : p.btcCorrelation;
-    const volMultiplier = stressed ? C.stressVolMult : 1.0;
     const driftBias = stressed ? C.stressDriftBias : 0;
 
     const btcMoReturn = p.btcAnnualReturn / 12;
-    const btcMoVol = (C.btcAnnualVol / Math.sqrt(12)) * volMultiplier;
+    const btcMoVol = (C.btcAnnualVol / Math.sqrt(12));
     const btcShock = btcMoReturn + btcMoVol * mcRandStudentT(rng, C.tDegreesFreedom);
-    const moVol = monthlyVol30d * Math.sqrt(30) / Math.sqrt(12) * volMultiplier;
+    const moVol = monthlyVol30d * Math.sqrt(30) / Math.sqrt(12);
+
+    // ─── v1.1 §4: maturity-driven fundamentals weight (endogenous crossover) ───
+    // maturity rises with network scale IN THIS PATH; fundamentals earn their weight.
+    const maturity = Math.min(1, networkEconActivity / MC_K_ACTIVITY);
+    const wFund = Math.min(1,
+      C.wFund0 + C.crossoverGain * (C.wFundMax - C.wFund0) * maturity
+    );
+    const wDyn = 1 - wFund;
 
     if (mo > 0) {
+      // ── FUNDAMENTALS channel (level driver) — NOT scaled by S (§3a.1) ──
       const burnBoost = tokensBurned > 0 ? (tokensBurned / totalSupply) * p.supplyElasticity : 0;
       const totalVolume = dexDailyVolume * 30 * cexVolMult;
       const volumeSignal = totalVolume > 0 ? Math.log(totalVolume / 50000) * C.volumeSignalCoeff : 0;
+      // fundamentals = value creation, weighted by linkage strength (§5 axis) and maturity weight
+      const fFund = (burnBoost + floatSignal + volumeSignal) * C.fundLinkage;
 
-      const drift = imbalanceDrift + burnBoost + volumeSignal + floatSignal + driftBias;
+      // ── DYNAMICS channel (macro weather) — SCALED by structure via g(S) (§3a.1) ──
+      const g = 1 + C.betaAmp * (S - 1);            // gentle directional amplification
       const btcComponent = effCorr * btcShock;
-      const idioComponent = (1 - effCorr) * moVol * mcRandStudentT(rng, C.tDegreesFreedom);
+      const fDyn = (btcComponent + imbalanceDrift + driftBias) * g;
 
-      price = price * Math.exp(drift + btcComponent + idioComponent - slippage);
+      // ── Idiosyncratic noise — full S·R amplification (§3a.1) ──
+      const idioComponent = (1 - effCorr) * moVol * mcRandStudentT(rng, C.tDegreesFreedom) * S * R;
+
+      // ── Combined: weighted drivers + scaled noise − amplified slippage ──
+      const drift = wFund * fFund + wDyn * fDyn;
+      price = price * Math.exp(drift + idioComponent - slippage);
       price = Math.max(price, 0.0001);
     }
 
@@ -1193,6 +1238,8 @@ function mcRunSim(p, seed, regimePath) {
       monthlyRewardPerNode: rewardPerNode,
       regimeStress: stressed ? 1 : 0,
       regimeSellMult,
+      wFund, structureMult: S,
+      maturity: Math.min(1, networkEconActivity / MC_K_ACTIVITY),
     });
   }
   return data;
@@ -1471,8 +1518,8 @@ function MonteCarloTab({ price: livePrice }) {
   const [activeWalletGrowth, setActiveWalletGrowth] = useState(5);
   // Market Dynamics
   const [buySellImbalance, setBuySellImbalance] = useState(1.0);
-  const [btcCorrelation, setBtcCorrelation] = useState(0.6);
-  const [volatility30d, setVolatility30d] = useState(8);
+  const [btcCorrelation, setBtcCorrelation] = useState(0.48);  // CALIBRATED: AUKI–BTC return corr from data
+  const [volatility30d, setVolatility30d] = useState(30);  // CALIBRATED: AUKI realized ~47%/mo = slider max
 
   // === 3 NEW REVIEW VARIABLES (Fixes #1, #2, #6) ===
   const [burnEfficiency, setBurnEfficiency] = useState(0.5);        // Var 11 (Fix #2)

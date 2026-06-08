@@ -1741,7 +1741,11 @@ function MonteCarloTab({ price: livePrice }) {
   const [dexDailyVolume, setDexDailyVolume] = useState(20000);
   const [liquidityDepth, setLiquidityDepth] = useState(580000);
   // Fundamentals
-  const [networkEconActivity, setNetworkEconActivity] = useState(25000);
+  // networkEconActivity is retained as a FIXED internal value (today's baseline).
+  // Its old slider was removed: the Application Revenue → buyback lever supersedes
+  // it as the way usage connects to price. It still feeds the maturity crossover at
+  // today's low level (maturity ≈ 0), which is correct for today's reality.
+  const [networkEconActivity] = useState(25000);
   const [unlockSellPressure, setUnlockSellPressure] = useState(35);
   const [openMarketBuybackUsd, setOpenMarketBuybackUsd] = useState(0);  // $/mo revenue-funded open-market buys; 0 = today's reality
   const [networkUsageGrowth, setNetworkUsageGrowth] = useState(8);
@@ -1758,7 +1762,7 @@ function MonteCarloTab({ price: livePrice }) {
 
   // ── Ecosystem inputs (Stage 7a) — FUTURE-STATE / ASSUMED. Default 0 = today's
   // reality (only Auki's own apps use the protocol; no live buyback, no operators).
-  const [monthlyRevenueUsd, setMonthlyRevenueUsd] = useState(0);  // SaaS fiat $/mo
+  const [monthlyRevenueUsd, setMonthlyRevenueUsd] = useState(0);  // application revenue, fiat $/mo
   const [diversionPct, setDiversionPct] = useState(30);           // POLICY: % of revenue → open-market buyback
   const [ecoDau, setEcoDau] = useState(0);                        // external daily active users
   const [ecoNodes, setEcoNodes] = useState(0);                    // decentralized operator nodes
@@ -1902,9 +1906,6 @@ function MonteCarloTab({ price: livePrice }) {
           {/* Column 2: Fundamentals */}
           <div>
             <div style={{ fontSize: 11, color: MC.subtle, letterSpacing: "0.1em", ...M, marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${MC.border}` }}>FUNDAMENTALS</div>
-            <MCSlider label="4 · NETWORK ECONOMIC ACTIVITY" value={networkEconActivity} onChange={setNetworkEconActivity}
-              min={0} max={500000} step={5000} format={(v) => `${mcFmtUsd(v)}/mo`}
-              tip="Real economic value generated through the AUKI ecosystem monthly. Drives burn-credit-mint. Growth capped at $10M/mo (logistic curve)." />
             <MCSlider label="5 · UNLOCK SELL PRESSURE" value={unlockSellPressure} onChange={setUnlockSellPressure}
               min={0} max={100} step={5} format={(v) => `${v}%`}
               tip="Estimated % of unlocked/vested tokens sold into the market. Models real supply shock and market absorption risk. 20% = holders hold. 60% = heavy dumping." />
@@ -1950,7 +1951,7 @@ function MonteCarloTab({ price: livePrice }) {
         {/* visible: these are projections of a network that has not yet scaled. */}
         <div style={{ marginTop: 22, padding: 16, border: `1px solid ${MC.purple}`, borderRadius: 10, background: "rgba(196,122,181,0.05)" }}>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
-            <div style={{ fontSize: 11, color: MC.purple, letterSpacing: "0.12em", ...M, fontWeight: 700 }}>ECOSYSTEM · ASSUMED · FUTURE-STATE</div>
+            <div style={{ fontSize: 11, color: MC.purple, letterSpacing: "0.12em", ...M, fontWeight: 700 }}>APPLICATION REVENUE · ASSUMED / FORWARD-LOOKING</div>
             <div style={{ fontSize: 10.5, color: MC.muted, ...M }}>default 0 = today (only Auki's apps use the protocol)</div>
           </div>
           <div style={{ fontSize: 11, color: MC.muted, lineHeight: 1.5, marginBottom: 14, maxWidth: 760 }}>
@@ -1959,9 +1960,9 @@ function MonteCarloTab({ price: livePrice }) {
             mechanism the sell side uses. At $0 revenue the model reproduces today's reality exactly.
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 24 }}>
-            <MCSlider label="MONTHLY REVENUE (SaaS, USD)" value={monthlyRevenueUsd} onChange={setMonthlyRevenueUsd}
+            <MCSlider label="APPLICATION REVENUE (USD)" value={monthlyRevenueUsd} onChange={setMonthlyRevenueUsd}
               min={0} max={5000000} step={50000} format={(v) => v === 0 ? "$0 (today)" : mcFmtUsd(v) + "/mo"}
-              tip="Real fiat SaaS revenue from apps on the network (e.g. Cactus for grocery chains). This is the dollars-in figure — whether from 1 client or 1,000 is irrelevant to the token; only the dollar total matters." />
+              tip="Monthly fiat revenue from applications running on the network. This is the dollars-in figure — whether from one large client or many small ones is irrelevant to the token; only the dollar total matters." />
             <MCSlider label="DIVERSION → BUYBACK (POLICY)" value={diversionPct} onChange={setDiversionPct}
               min={0} max={100} step={5} format={(v) => `${v}%`}
               tip="POLICY CHOICE (not a market outcome): the % of revenue routed to buying $AUKI on the OPEN MARKET and burning it. Open-market buys move price; treasury-sourced burns would not. This dial is the single most important policy lever — shown here as policy, set by Auki, not derived." />

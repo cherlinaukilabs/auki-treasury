@@ -884,20 +884,22 @@ function CexMarketActivityTab({ ticker, tickerLoading, tickerError, tickerRefres
   );
 }
 
-// ─── Monte Carlo Simulation ──────────────────────────────────────────────────
-// 10 variables chosen by the AUKI team:
-// 1. CEX Coverage Score (1–10)         — exchange reach, institutional access
-// 2. DEX Daily Volume ($)              — organic on-chain trading baseline
+// ─── Market-Flow Sensitivity Simulation ─────────────────────────────────────
+// This tab is intentionally NOT a protocol-adoption / token-utility model.
+// It is a market-flow scenario engine for the current state of play:
+// as of 8 Jun 2026, the only app maker using the protocol is Auki itself.
+//
+// 10 visible variables:
+// 1. CEX Coverage Score (1–10)         — exchange reach / liquidity distribution
+// 2. DEX Daily Volume ($)              — trading activity context
 // 3. Liquidity Depth ($)               — USD within ±2% of mid-price
-// 4. Network Economic Activity ($)     — real ecosystem value → burn driver
-// 5. Unlock Sell Pressure (%)          — % of vested tokens sold immediately
-// 6. Network Usage Growth (%/mo)       — adoption / utility expansion
-// 7. Active Wallet Growth (%/mo)       — ecosystem expansion proxy
-// 8. Buy/Sell Imbalance (ratio)        — >1 = net accumulation, <1 = distribution
-// 9. BTC Correlation (0–1)             — broader crypto market beta
-// 10. 30-Day Volatility (%)            — rolling price uncertainty
-
-const MC_DEFLATION_FLOOR = 5_000_000_000;
+// 4. Unlock Sell Pressure (%)          — % of newly vested tokens sold
+// 5. Buy/Sell Imbalance (ratio)        — >1 = accumulation, <1 = distribution
+// 6. BTC Correlation (0–1)             — broader crypto market beta
+// 7. 30-Day Volatility (%)             — AUKI-specific price uncertainty
+// 8. BTC Scenario (%/yr)               — external crypto market backdrop
+// 9. Application Revenue ($/mo)        — Auki-controlled app revenue assumption
+// 10. Diversion → Buyback (%)          — policy share routed to open-market buys
 const MC_TGE_DATE = new Date("2024-08-28");
 
 const MC_ALLOCATIONS = [
@@ -976,61 +978,43 @@ function mcGetNewUnlocks(month) {
   return mcGetVestedAtMonth(month) - mcGetVestedAtMonth(month - 1);
 }
 
-// ─── Simulation (13-variable engine · Rev 2) ─────────────────────────────────
-// Fixes applied from independent technical review:
-//   #1 burnBoost coefficient → documented supplyElasticity parameter (Var 13)
-//   #2 burn efficiency → explicit burnEfficiency parameter (Var 11)
-//   #3 staking → price feedback via floatSignal
-//   #4 logistic growth caps for network usage + wallet growth
-//   #5 separate wallet elasticities for burns, liquidity, staking
-//   #6 BTC return → user-adjustable btcAnnualReturn (Var 12)
-//   #7 path count → 1000 (set in MonteCarloTab)
-//   #8 probability labels → "scenario frequency" (set in mcSummary + UI)
-
-// Carrying capacity constants for logistic growth (#4)
-const MC_K_ACTIVITY = 10_000_000; // $10M/mo max network economic activity
-const MC_K_WALLETS = 5_000_000;   // 5M max active wallets
-
-// Wallet elasticity exponents (#5) — sub-linear scaling
-const MC_BURN_WALLET_ELASTICITY = 0.80;      // burns grow slightly slower than wallets
-const MC_LIQUIDITY_WALLET_ELASTICITY = 0.50;  // liquidity is capital-constrained
-const MC_STAKING_WALLET_ELASTICITY = 0.60;    // staking is incentive-dependent
+// ─── Market-flow engine constants ────────────────────────────────────────────
+// The old network-activity, burn, mint, wallet-elasticity and fundamentals
+// crossover machinery has deliberately been removed. Supply is static in this
+// tab. The only value-capture wire is app revenue routed into open-market buys.
 
 // ─── ASSUMED, NOT CALIBRATED ──────────────────────────────────────────────────
 // Rev 3 exposes its assumptions instead of hiding them. NONE of these is fitted
 // to AUKI price history (there isn't enough of it). The diagnostics panel renders
 // this object so a knowledgeable viewer can see exactly what is being assumed.
 const ASSUMED_COEFFS = {
+  // Directional market-flow assumptions
   imbalanceDriftCoeff: 0.03,   // per unit of buy/sell ratio
-  volumeSignalCoeff: 0.003,    // per log-unit of volume vs $50K baseline
-  floatSignalCoeff: 0.02,      // scarcity premium per unit locked
-  btcAnnualVol: 0.44,          // CALIBRATED: BTC realised vol from 500d AUKI-window data
-  // — regime model —
-  tDegreesFreedom: 6,          // CALIBRATED: AUKI kurtosis 4.15 milder than df5; df6 fits better
-  stressEntryProb: 0.05,       // P(calm → stress) per month  (~1 spell / 20mo)
-  stressExitProb: 0.40,        // P(stress → calm) per month  (mean stress ≈ 2.5mo)
+  buySideImpact: 1.0,          // ASSUMED: $1 buy moves price as hard as $1 sell
+
+  // Calibrated / historically anchored market inputs
+  btcAnnualVol: 0.44,          // BTC realised vol over the AUKI calibration window
+  tDegreesFreedom: 6,          // AUKI measured kurtosis is fat-tailed but not pathological
+
+  // Two-state regime model
+  stressEntryProb: 0.05,       // P(calm → stress) per month (~1 spell / 20mo)
+  stressExitProb: 0.40,        // P(stress → calm) per month (mean stress ≈ 2.5mo)
   stressVolMult: 1.8,          // vol multiplier while in stress
   stressDriftBias: -0.02,      // additive monthly drift drag while in stress
   stressCorrFloor: 0.85,       // BTC correlation pulled toward this in stress
-  stressSellMult: 1.5,         // sell-pressure multiplier during stress (capitulation)
-  // ── v1.1 structural redesign — UNCALIBRATED, illustrative defaults ──
-  // Structure (liquidity) is now a MULTIPLIER on dynamics+noise+slippage, not an
-  // additive drift term (§3, §3a.1). These govern how hard moves land.
-  refLiquidity: 580000,        // reference depth; S = refLiquidity / effLiq
-  S_MAX: 8,                    // §3a.3 hard cap on structure multiplier (anti-detonation)
-  betaAmp: 0.5,                // §3a.1 gentle directional amplification (g = 1 + betaAmp·(S−1))
-  liqFloorFrac: 0.20,          // §3a.2 effLiq can thin to 20% of base, never zero
-  liqPriceCoupling: 0.5,       // §3a.2 k<1: liquidity follows price sub-linearly
-  // Maturity crossover (§4) — fundamentals weight rises as the network scales
-  wFund0: 0.25,                // illustrative starting fundamentals weight (altcoin → dynamics-led)
-  wFundMax: 0.75,              // max fundamentals weight at full maturity
-  crossoverGain: 1.0,          // §5 belief dial — the surface axis; 1.0 = neutral
-  fundLinkage: 1.0,            // §5 fundamentals-linkage strength — the other surface axis
+  stressSellMult: 1.5,         // unlock-sell multiplier during stress (capitulation)
+
+  // Market-structure coupling
+  refLiquidity: 580000,        // reference depth; S = refLiquidity / effectiveLiquidity
+  S_MAX: 8,                    // hard cap on structure multiplier
+  betaAmp: 0.5,                // directional amplification: g = 1 + betaAmp·(S−1)
+  liqFloorFrac: 0.20,          // liquidity can thin to 20% of base, never zero
+  liqPriceCoupling: 0.5,       // liquidity follows price sub-linearly
 };
 
 // ─── Student-t shock (fat tails) ──────────────────────────────────────────────
 // Variance-normalised so the vol sliders still mean "this sigma"; df controls
-// only the tail thickness. df=5 keeps real crash risk without nuking the median.
+// only the tail thickness. df=6 preserves fat tails while keeping finite variance.
 function mcRandStudentT(rng, df) {
   const z = mcRandNormal(rng);
   let w = 0;
@@ -1058,61 +1042,55 @@ function mcBuildRegimePath(months, seed = 999983) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// SIMULATION · Rev 3 ("structural")
-// Same public signature as Rev 2 plus an optional shared regimePath (3rd arg).
-// Changes vs Rev 2:
-//   • FIXED slippage: Rev 2's sellUSD/(2·liq) produced ~39%/month impact and
-//     collapsed the base case to a ~95% drawdown regardless of BTC. Now a
-//     saturating impact k/(1+k) — concave, bounded, responsive to inputs.
-//   • Student-t shocks (fat tails) on both BTC and idiosyncratic components.
-//   • Regime switching: stress raises vol, pulls correlation→0.85, thins
-//     liquidity, intensifies selling.
-//   • Honest R4: AUKI's vesting cliffs are all in the past, so no fake forward
-//     cliff spike — selling instead intensifies during stress regimes.
-// Everything else (PRNG, normal draw, logistic caps, wallet elasticities,
-// asymptotic 5B mint floor, USD-denominated burns) is preserved from Rev 2.
+// SIMULATION · Rev 4 (market-flow)
+// Purpose:
+//   Test whether market-structure, unlock selling, BTC beta, volatility and
+//   Auki-controlled app-revenue buybacks can move the token price distribution.
+//
+// Deliberately excluded from this tab:
+//   protocol adoption, third-party app-maker demand, contributor economics,
+//   burns, credits, mint offsets, reward pools, node ROI and maturity crossover.
+//
+// Retained:
+//   PRNG reproducibility, Student-t fat tails, shared regime switching,
+//   vesting unlocks, price-coupled liquidity, bounded net-flow impact.
 // ════════════════════════════════════════════════════════════════════════════
-// ─── Ecosystem flows (Stage 1) — adoption inputs → monthly dollar flows ───────
-// Paper-grounded; all inputs default to zero (today's reality) ⇒ all flows zero,
-// so the price engine reduces exactly to the calibrated sell-side engine.
-const MC_ECO = {
-  servicePricePerDAU: 0.01, stakePerNodeUsd: 200, rewardPoolMintShare: 0.50,
-  operatorCostPerDay: 0.86,
-};
-function mcEcosystemFlows(inp) {
-  const monthlyRevenueUsd = inp.monthlyRevenueUsd || 0;
-  const diversionPct = inp.diversionPct || 0;
-  const dau = inp.dau || 0;
-  const decentralizedNodes = inp.decentralizedNodes || 0;
-  const tokensMintedThisMonth = inp.tokensMintedThisMonth || 0;
-  const predictiveStakeUsd = inp.predictiveStakeUsd || 0;
-
-  const buybackUsd = monthlyRevenueUsd * (diversionPct / 100);
-  const creditBurnUsd = dau * MC_ECO.servicePricePerDAU * 30.44;
-  const operatorStakeLockUsd = decentralizedNodes * MC_ECO.stakePerNodeUsd;
-  const operatorRewardsUsd = tokensMintedThisMonth * MC_ECO.rewardPoolMintShare;
-  const operatorCostUsd = decentralizedNodes * MC_ECO.operatorCostPerDay * 30.44;
-  const operatorSellUsd = Math.min(Math.max(operatorCostUsd, 0), Math.max(operatorRewardsUsd, 0));
-  return {
-    buybackUsd, creditBurnUsd, operatorStakeLockUsd, operatorSellUsd,
-    totalFloatLockUsd: operatorStakeLockUsd + predictiveStakeUsd,
-  };
+// ─── App-revenue buyback helper ──────────────────────────────────────────────
+function mcCalcBuybackUsd(monthlyRevenueUsd = 0, diversionPct = 0) {
+  return Math.max(0, monthlyRevenueUsd) * (Math.max(0, diversionPct) / 100);
 }
 
 function mcRunSim(p, seed, regimePath) {
+  // ════════════════════════════════════════════════════════════════════════
+  // MARKET-FLOW ENGINE (fundamentals channel removed, 8 Jun 2026)
+  // ────────────────────────────────────────────────────────────────────────
+  // AUKI has no external protocol economy yet (only Auki's own apps use the
+  // protocol). The previous "fundamentals" channel — assumed network-activity
+  // growth → assumed burns/float/volume → assumed price lift, gated by an
+  // assumed maturity crossover — modelled an ecosystem that is not live and
+  // could not be calibrated from price data. It has been removed in full.
+  //
+  // Price now moves ONLY through forces that can be observed and defended today:
+  //   • DYNAMICS  — BTC beta + sentiment, structure-amplified (g(S))
+  //   • IDIOSYNCRATIC NOISE — AUKI variance, structure & regime scaled (S·R)
+  //   • NET-FLOW IMPACT — unlock selling (+ operator selling) NETTED against
+  //     app-revenue-funded open-market buybacks, through one liquidity model
+  // Burns, mint, supply deflation, wallet elasticities, the float/scarcity
+  // signal, the volume drift signal, the maturity crossover and the
+  // fundamentals/ dynamics weight blend are all GONE. Supply is static
+  // (display only); CEX coverage and DEX volume survive solely as market-
+  // structure inputs (liquidity depth, not a fundamentals drift term).
+  // ════════════════════════════════════════════════════════════════════════
   const C = ASSUMED_COEFFS;
   const rng = mcMulberry32(seed);
   const mFromTGE = Math.round((Date.now() - MC_TGE_DATE.getTime()) / (30.44 * 864e5));
   const data = [];
   let price = p.startPrice;
-  let totalSupply = 9_990_593_505;
-  let cumulBurned = TOTAL_SUPPLY - 9_990_593_505;
-  let rewardPool = 50_000_000;
 
-  let liquidityDepth = p.liquidityDepth;
-  let networkEconActivity = p.networkEconActivity;
-  let dexDailyVolume = p.dexDailyVolume;
-  let activeWallets = 12000;
+  // Supply is now STATIC (no burns/mint). Kept for display fields only.
+  const totalSupply = 9_990_593_505;
+  const dexDailyVolume = p.dexDailyVolume; // structural input; no longer grows via usage
+
   const monthlyVol30d = (p.volatility30d / 100);
 
   // private regime path if none injected (keeps the fn usable standalone)
@@ -1133,81 +1111,33 @@ function mcRunSim(p, seed, regimePath) {
     const totalVested = mcGetVestedAtMonth(gm);
     const stressed = inStress(mo);
 
-    if (mo > 0) {
-      const logisticRate = (p.networkUsageGrowth / 100) * (1 - networkEconActivity / MC_K_ACTIVITY);
-      networkEconActivity *= (1 + Math.max(0, logisticRate));
-      const walletRate = (p.activeWalletGrowth / 100) * (1 - activeWallets / MC_K_WALLETS);
-      activeWallets *= (1 + Math.max(0, walletRate));
-    }
+    // ─── Staking / float (DISPLAY ONLY — no longer feeds price) ───
+    // Base protocol staking against vested supply; no wallet-growth elasticity.
+    const stakedTokens = totalVested * 0.12 * Math.min(2, 1 + mo * 0.01);
+    const effCirc = Math.max(0, totalVested - stakedTokens);
 
-    const wRatio = activeWallets / 12000;
-    const burnMult = Math.pow(wRatio, MC_BURN_WALLET_ELASTICITY);
-    const liquidityMult = Math.pow(wRatio, MC_LIQUIDITY_WALLET_ELASTICITY);
-    const stakingMult = Math.pow(wRatio, MC_STAKING_WALLET_ELASTICITY);
-
-    const burnUsd = networkEconActivity * burnMult * p.burnEfficiency;
-    const tokensBurned = price > 0 ? burnUsd / price : 0;
-
-    const supplyRatio = Math.max(0, (totalSupply - MC_DEFLATION_FLOOR) / (TOTAL_SUPPLY - MC_DEFLATION_FLOOR));
-    const mintRatio = 1 - supplyRatio;
-    const tokensMinted = tokensBurned * mintRatio;
-    if (mo > 0) {
-      totalSupply = Math.max(MC_DEFLATION_FLOOR, totalSupply - tokensBurned + tokensMinted);
-      cumulBurned += tokensBurned - tokensMinted;
-    }
-
-    const taxTokens = tokensMinted * 0.05;
-    rewardPool += tokensMinted - taxTokens;
-    const operatorClaims = rewardPool * 0.08;
-    rewardPool = Math.max(0, rewardPool - operatorClaims);
-
-    const foundAlloc = MC_ALLOCATIONS.find((a) => a.name === "Foundation");
-    const foundVested = mcGetVestedAtMonth(gm) - mcGetVestedAtMonth(0);
-    const treasuryBalance = (foundAlloc ? (foundAlloc.tokens / TOTAL_SUPPLY) * foundVested : 0) * price + taxTokens * price;
-
-    const stakedTokens = totalVested * 0.12 * stakingMult * Math.min(2, 1 + mo * 0.01);
-
-    // R4: base sell schedule × regime capitulation multiplier
+    // ─── Sell side: unlock selling × regime capitulation multiplier ───
     const regimeSellMult = stressed ? C.stressSellMult : 1.0;
     const sellTokens = newUnlocks * (p.unlockSellPressure / 100) * regimeSellMult;
     const sellImpactUsd = sellTokens * price;
 
-    // ─── Open-market buyback + operator flows (fed by the ecosystem engine) ───
-    // The buy-side flow comes from revenue diverted to open-market buys; operator
-    // selling (to cover node costs) is a competing sell flow. Both are computed by
-    // the ecosystem engine (Stage 1). IMPORTANT (spec §2.1): the buy-side IMPACT
-    // MAGNITUDE is ASSUMED SYMMETRIC with the sell side and is NOT supported by
-    // data — the backtest validates the sell-dominated downside only. The buy-side
-    // multiplier is therefore an explicit belief input (buySideImpact), default 1.0,
-    // destined for the belief surface (Stage 6), not a calibrated constant.
-    // All ecosystem inputs default to zero ⇒ flows zero ⇒ engine reduces EXACTLY to
-    // the calibrated sell-side engine (regression gate, spec §7.4).
-    const eco = mcEcosystemFlows({
-      monthlyRevenueUsd: p.monthlyRevenueUsd || 0,
-      diversionPct: p.diversionPct || 0,
-      dau: p.ecoDau || 0,
-      decentralizedNodes: p.ecoNodes || 0,
-      tokensMintedThisMonth: 0,   // wired to BME mint in a later stage; 0 keeps regression exact
-      predictiveStakeUsd: p.predictiveStakeUsd || 0,
-    });
-    const buySideImpact = (p.buySideImpact == null ? 1.0 : p.buySideImpact); // ASSUMED axis (spec §2.1)
-    // legacy direct lever still honoured (adds to ecosystem buyback)
-    const buybackUsd = (eco.buybackUsd + (p.openMarketBuybackUsd || 0)) * buySideImpact;
-    const operatorSellUsd = eco.operatorSellUsd;
-    const buyTokens = price > 0 ? buybackUsd / price : 0;
+    // ─── Buy side: app-revenue-funded open-market buyback (the value-capture wire) ───
+    // buybackUsd = monthly application revenue × diversion% (a concrete policy).
+    // IMPORTANT: the buy-side IMPACT MAGNITUDE is an ASSUMED symmetry with the
+    // sell side and is NOT supported by data — the backtest validates the
+    // sell-dominated downside only. buySideImpact (default 1.0) keeps that
+    // assumption explicit and adjustable.
+    const buySideImpact = (p.buySideImpact == null ? C.buySideImpact : p.buySideImpact); // ASSUMED
+    const grossBuybackUsd = mcCalcBuybackUsd(p.monthlyRevenueUsd || 0, p.diversionPct || 0);
+    const buybackUsd = grossBuybackUsd * buySideImpact;
+    const operatorSellUsd = 0; // contributor/operator economics are outside this tab
 
+    // ─── Market structure: CEX coverage deepens liquidity & scales volume display ───
     const cexVolMult = 1 + (p.cexCoverageScore - 1) * 0.4;
     const cexLiqBoost = 1 + (p.cexCoverageScore - 1) * 0.25;
-    if (mo > 0) {
-      const volLogistic = (p.networkUsageGrowth / 200) * (1 - networkEconActivity / MC_K_ACTIVITY);
-      dexDailyVolume *= (1 + Math.max(0, volLogistic));
-    }
 
-    // ─── v1.1 §3a.2: effectiveLiquidity COUPLED to price + stress, damped & floored ───
-    // Base depth grows with CEX coverage and wallet base (exogenous trend), then is
-    // coupled to price sub-linearly (k<1) with a hard floor so the downside loop
-    // (price↓ → liquidity↓ → amplification↑ → bigger↓) is realistic but can't spiral.
-    const baseLiq = p.liquidityDepth * cexLiqBoost * liquidityMult;
+    // ─── Effective liquidity: coupled to price (sub-linear, floored) + stress ───
+    const baseLiq = p.liquidityDepth * cexLiqBoost; // no wallet-growth multiplier now
     const priceCoupling = Math.max(
       C.liqFloorFrac,
       Math.pow(price / p.startPrice, C.liqPriceCoupling)
@@ -1215,89 +1145,55 @@ function mcRunSim(p, seed, regimePath) {
     const stressLiqDrain = stressed ? 0.75 : 1.0;
     const effectiveLiquidity = baseLiq * priceCoupling * stressLiqDrain;
 
-    // ─── v1.1 §3, §3a.3: Structure multiplier S — thin amplifies, deep dampens; BOUNDED ───
-    const concentrationFactor = 1.0; // placeholder hook for §3a holder-concentration (not yet built)
+    // ─── Structure multiplier S — thin amplifies, deep dampens; BOUNDED ───
+    const concentrationFactor = 1.0;
     const S = Math.min(
       C.S_MAX,
       effectiveLiquidity > 0 ? (C.refLiquidity / effectiveLiquidity) * concentrationFactor : C.S_MAX
     );
-    // Regime multiplier R: stress widens everything at once
     const R = stressed ? C.stressVolMult : 1.0;
 
-    // ─── Net-flow price impact (§3a.1): buy pressure competes with sell pressure ───
-    // against the SAME effective liquidity. Net sell → downward impact (slippage);
-    // net buy → upward impact (buy-side lift). Symmetric, bounded, regime-amplified.
-    const DEPTH_FACTOR = 18;  // CALIBRATED: monthly flow spreads ~3x wider than ±2% band; backtested to real AUKI 16mo drawdown
-    const netFlowUsd = sellImpactUsd + operatorSellUsd - buybackUsd;   // >0 = net selling, <0 = net buying
+    // ─── Net-flow price impact: buys compete with sells against same liquidity ───
+    const DEPTH_FACTOR = 18;  // CALIBRATED via backtest to AUKI's real 16-mo drawdown
+    const netFlowUsd = sellImpactUsd + operatorSellUsd - buybackUsd; // >0 net sell, <0 net buy
     const rawNet = effectiveLiquidity > 0 ? netFlowUsd / (DEPTH_FACTOR * effectiveLiquidity) : 0;
-    // saturating concave impact, applied symmetrically around zero
     const impactMag = Math.abs(rawNet) / (1 + Math.abs(rawNet));
-    const netImpact = Math.sign(rawNet) * impactMag;   // + = price drag (sell), − = lift (buy)
-    const slippage = Math.min(0.95, Math.max(-0.95, netImpact * R)); // R widens; bounded both sides
+    const netImpact = Math.sign(rawNet) * impactMag;
+    const slippage = Math.min(0.95, Math.max(-0.95, netImpact * R));
 
-    const effCirc = Math.max(0, totalVested - stakedTokens - cumulBurned);
-    const floatRatio = totalSupply > 0 ? effCirc / totalSupply : 1;
-    const floatSignal = (1 - floatRatio) * C.floatSignalCoeff;
+    // ─── Dynamics channel (macro weather), structure-amplified ───
     const imbalanceDrift = (p.buySellImbalance - 1) * C.imbalanceDriftCoeff;
-
-    // regime-adjusted correlation
     const effCorr = stressed
       ? p.btcCorrelation + (C.stressCorrFloor - p.btcCorrelation) * 0.7
       : p.btcCorrelation;
     const driftBias = stressed ? C.stressDriftBias : 0;
-
     const btcMoReturn = p.btcAnnualReturn / 12;
     const btcMoVol = (C.btcAnnualVol / Math.sqrt(12));
     const btcShock = btcMoReturn + btcMoVol * mcRandStudentT(rng, C.tDegreesFreedom);
     const moVol = monthlyVol30d * Math.sqrt(30) / Math.sqrt(12);
 
-    // ─── v1.1 §4: maturity-driven fundamentals weight (endogenous crossover) ───
-    // maturity rises with network scale IN THIS PATH; fundamentals earn their weight.
-    const maturity = Math.min(1, networkEconActivity / MC_K_ACTIVITY);
-    const crossoverGain = (p.crossoverGain == null ? C.crossoverGain : p.crossoverGain); // belief axis
-    const wFund = Math.min(1,
-      C.wFund0 + crossoverGain * (C.wFundMax - C.wFund0) * maturity
-    );
-    const wDyn = 1 - wFund;
-
     if (mo > 0) {
-      // ── FUNDAMENTALS channel (level driver) — NOT scaled by S (§3a.1) ──
-      const burnBoost = tokensBurned > 0 ? (tokensBurned / totalSupply) * p.supplyElasticity : 0;
-      const totalVolume = dexDailyVolume * 30 * cexVolMult;
-      const volumeSignal = totalVolume > 0 ? Math.log(totalVolume / 50000) * C.volumeSignalCoeff : 0;
-      // fundamentals = value creation, weighted by linkage strength (§5 axis) and maturity weight
-      const fundLinkage = (p.fundLinkage == null ? C.fundLinkage : p.fundLinkage); // belief axis
-      const fFund = (burnBoost + floatSignal + volumeSignal) * fundLinkage;
-
-      // ── DYNAMICS channel (macro weather) — SCALED by structure via g(S) (§3a.1) ──
-      const g = 1 + C.betaAmp * (S - 1);            // gentle directional amplification
-      const btcComponent = effCorr * btcShock;
-      const fDyn = (btcComponent + imbalanceDrift + driftBias) * g;
-
-      // ── Idiosyncratic noise — full S·R amplification (§3a.1) ──
+      const g = 1 + C.betaAmp * (S - 1);              // gentle directional amplification
+      const fDyn = (effCorr * btcShock + imbalanceDrift + driftBias) * g;
       const idioComponent = (1 - effCorr) * moVol * mcRandStudentT(rng, C.tDegreesFreedom) * S * R;
-
-      // ── Combined: weighted drivers + scaled noise − amplified slippage ──
-      const drift = wFund * fFund + wDyn * fDyn;
-      price = price * Math.exp(drift + idioComponent - slippage);
+      // PRICE UPDATE: dynamics + noise − net-flow impact. No fundamentals term.
+      price = price * Math.exp(fDyn + idioComponent - slippage);
       price = Math.max(price, 0.0001);
     }
 
-    const rewardPerNode = operatorClaims > 0 ? (operatorClaims * price) / Math.max(1, stakedTokens / 1e6) : 0;
+    // totalVolume kept for any volume display; no longer a price signal
+    const totalVolume = dexDailyVolume * 30 * cexVolMult;
 
     data.push({
       month: mo, price, totalSupply, circulatingSupply: effCirc, totalVested, newUnlocks,
-      cumulBurned, tokensBurned: mo === 0 ? 0 : tokensBurned, tokensMinted: mo === 0 ? 0 : tokensMinted,
-      netDeflation: mo === 0 ? 0 : tokensBurned - tokensMinted, stakedTokens, rewardPool,
-      treasuryBalance, sellPressureUsd: sellImpactUsd, slippage, effectiveLiquidity,
-      marketCap: price * effCirc, fdv: price * totalSupply, mintRatio,
-      dexDailyVolume, activeWallets, networkEconActivity,
-      nodeROI: rewardPerNode > 0 ? ((rewardPerNode - 50) / 50) * 100 : -100,
-      monthlyRewardPerNode: rewardPerNode,
+      cumulBurned: 0, tokensBurned: 0, tokensMinted: 0,
+      netDeflation: 0, stakedTokens, rewardPool: 0,
+      treasuryBalance: 0, sellPressureUsd: sellImpactUsd, slippage, effectiveLiquidity,
+      marketCap: price * effCirc, fdv: price * totalSupply, mintRatio: 0,
+      dexDailyVolume, totalVolume, buybackUsd,
       regimeStress: stressed ? 1 : 0,
       regimeSellMult,
-      wFund, structureMult: S,
-      maturity: Math.min(1, networkEconActivity / MC_K_ACTIVITY),
+      structureMult: S,
     });
   }
   return data;
@@ -1378,18 +1274,19 @@ function MCDiagnostics({ sims, months, startPrice }) {
   const C = ASSUMED_COEFFS;
   const coeffRows = [
     ["Imbalance drift", C.imbalanceDriftCoeff, "per unit buy/sell ratio"],
-    ["Volume signal", C.volumeSignalCoeff, "per log-unit vs $50K"],
-    ["Float signal", C.floatSignalCoeff, "scarcity premium per unit locked"],
-    ["BTC annual vol", C.btcAnnualVol, "historical realised, not AUKI-specific"],
-    ["Tail thickness (t df)", C.tDegreesFreedom, "df=5 → fat but finite kurtosis"],
+    ["Buy-side impact", C.buySideImpact, "assumed $ buy impact vs $ sell impact"],
+    ["BTC annual vol", C.btcAnnualVol, "historically anchored"],
+    ["Tail thickness (t df)", C.tDegreesFreedom, "Student-t fat tails"],
     ["Stress entry / mo", C.stressEntryProb, "Markov calm→stress probability"],
     ["Stress vol mult", C.stressVolMult, "vol scaling inside stress regime"],
+    ["Reference liquidity", C.refLiquidity, "neutral structure-multiplier depth"],
+    ["Liquidity price coupling", C.liqPriceCoupling, "sub-linear liquidity reflexivity"],
   ];
   return (
     <div style={{ background: MC.card, border: `1px solid ${MC.cardBorder}`, borderRadius: 10, padding: "18px 22px", marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, borderBottom: `1px solid ${MC.border}`, paddingBottom: 10 }}>
         <div style={{ fontSize: 14, color: MC.subtle, letterSpacing: "0.1em", fontWeight: 700, ...M }}>0 · MODEL DIAGNOSTICS & UNCERTAINTY</div>
-        <span style={{ fontSize: 10, color: MC.gold, border: `1px solid ${MC.gold}55`, borderRadius: 4, padding: "2px 8px", ...M }}>REV 3 · STRUCTURAL</span>
+        <span style={{ fontSize: 10, color: MC.gold, border: `1px solid ${MC.gold}55`, borderRadius: 4, padding: "2px 8px", ...M }}>REV 4 · MARKET-FLOW</span>
       </div>
 
       <div style={{ background: "#0D1117", border: `1px solid ${MC.cardBorder}`, borderRadius: 8, padding: "14px 16px", marginBottom: 12 }}>
@@ -1410,9 +1307,9 @@ function MCDiagnostics({ sims, months, startPrice }) {
       <div style={{ background: "#0D1117", border: `1px solid ${MC.cardBorder}`, borderRadius: 8, padding: "14px 16px" }}>
         <div style={{ fontSize: 11, color: MC.red, letterSpacing: "0.08em", ...M, marginBottom: 8, fontWeight: 700 }}>⚠ ASSUMED — NOT CALIBRATED TO AUKI DATA</div>
         <div style={{ fontSize: 13, color: MC.muted, ...M, lineHeight: 1.65, marginBottom: 10 }}>
-          AUKI has &lt;2 years of thin price history — not enough to fit these. They are chosen for reasonable
-          magnitude and directional logic. Treat the model as a transparent assumption engine, not a forecast.
-          Move the sliders; watch how much the output depends on these choices.
+          This model deliberately excludes protocol-adoption fundamentals. It tests market flows only:
+          unlock selling, buyback demand, BTC beta, volatility and liquidity. Treat it as a transparent
+          scenario engine, not a forecast or valuation.
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "4px 16px" }}>
           {coeffRows.map(([label, val, note]) => (
@@ -1523,7 +1420,7 @@ function MCSection({ title, explanation, children }) {
   );
 }
 
-// ─── Executive Summary Generator (Fix #8: scenario frequency, not probability) ─
+// ─── Executive Summary Generator ─────────────────────────────────────────────
 function mcSummary(sims, months, startPrice) {
   const fp = mcPercentiles(sims, "price", months);
   const fs = mcPercentiles(sims, "totalSupply", months);
@@ -1533,14 +1430,12 @@ function mcSummary(sims, months, startPrice) {
   const freq2x = sims.filter((s) => s[months]?.price > startPrice * 2).length / sims.length * 100;
   const freq50drop = sims.filter((s) => s[months]?.price < startPrice * 0.5).length / sims.length * 100;
   const priceMult = (fp.p50 / startPrice).toFixed(1);
-  const deflated = ((TOTAL_SUPPLY - fs.p50) / TOTAL_SUPPLY * 100).toFixed(1);
   const outlook = freqAbove > 60 ? "optimistic" : freqAbove < 40 ? "cautious" : "neutral";
   return {
-    text: `Over ${mcFmtMo(months)}, ${freqAbove.toFixed(0)}% of modelled scenarios show AUKI above today's ${mcFmtPrice(startPrice)}. Median price: ${mcFmtPrice(fp.p50)} (${priceMult}x). Range: ${mcFmtPrice(fp.p10)} to ${mcFmtPrice(fp.p90)} (P10–P90). Supply deflates ${deflated}% to ${mcFmtB(fs.p50)}. Median market cap: ${mcFmtUsd(fm.p50)}.`,
+    text: `Over ${mcFmtMo(months)}, ${freqAbove.toFixed(0)}% of modelled scenarios show AUKI above today's ${mcFmtPrice(startPrice)}. Median price: ${mcFmtPrice(fp.p50)} (${priceMult}x). Range: ${mcFmtPrice(fp.p10)} to ${mcFmtPrice(fp.p90)} (P10–P90). Median market cap: ${mcFmtUsd(fm.p50)}. This is a market-flow model: price moves through liquidity, unlock selling, BTC/market dynamics, and app-revenue buybacks only — no protocol-economy fundamentals are assumed.`,
     bullets: [
       `${freq2x.toFixed(0)}% of scenarios reach 2x or higher`,
       `${freq50drop.toFixed(0)}% of scenarios show 50%+ drawdown`,
-      `Circulating supply: ${mcFmtB(fc.p50)} (P50)`,
     ],
     outlook, freqAbove, freq2x, freq50drop, fp, fs, fc, fm,
   };
@@ -1580,154 +1475,7 @@ function useMCWorker(params, numSims) {
   return { sims, running };
 }
 
-// ─── Belief Surface (Stage 6, spec §6 + §4.1) ───────────────────────────────
-// The honest headline: median price across the grid of two UN-CALIBRATABLE belief
-// axes (fundamentals-linkage × buy-side impact), crossover-gain held at a stated
-// value. Shows how much of any result is authored by belief vs. forced by the
-// calibrated mechanics. Computes ON DEMAND (button) — a 5×5 grid × N paths is
-// heavy and must not fire on every slider move. The triple-optimistic corner
-// (both axes maxed) is greyed + labelled as the least-supported region (§4.1).
-const MC_SURFACE_LINKAGE = [0.25, 0.5, 1.0, 1.5, 2.0];
-const MC_SURFACE_BUY = [0.25, 0.5, 1.0, 1.5, 2.0];
-
-function mcSurfaceColor(m) {
-  const t = Math.max(0, Math.min(1, (m - 0.5) / (2.2 - 0.5)));
-  let r, g, b;
-  if (t < 0.5) { r = 200; g = Math.round(60 + t * 2 * 150); b = 40; }
-  else { r = Math.round(200 - (t - 0.5) * 2 * 150); g = 210; b = Math.round(40 + (t - 0.5) * 2 * 60); }
-  return `rgb(${r},${g},${b})`;
-}
-
-function MCBeliefSurface({ baseParams, numSimsPerCell = 600, crossoverGain = 1.0 }) {
-  const [grid, setGrid] = useState(null);
-  const [running, setRunning] = useState(false);
-  const [computedAt, setComputedAt] = useState(null);
-
-  const compute = useCallback(() => {
-    setRunning(true);
-    setGrid(null);
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        try {
-          const startP = baseParams.startPrice;
-          const out = [];
-          for (const b of MC_SURFACE_BUY) {
-            const row = [];
-            for (const l of MC_SURFACE_LINKAGE) {
-              const sims = mcRunAll(
-                { ...baseParams, fundLinkage: l, buySideImpact: b, crossoverGain },
-                numSimsPerCell
-              );
-              const p = mcPercentiles(sims, "price", baseParams.months);
-              row.push(p.p50 / startP);
-            }
-            out.push(row);
-          }
-          setGrid(out);
-          setComputedAt(Date.now());
-        } catch (e) {
-          setGrid(null);
-        }
-        setRunning(false);
-      });
-    });
-  }, [baseParams, numSimsPerCell, crossoverGain]);
-
-  const nrow = MC_SURFACE_BUY.length, ncol = MC_SURFACE_LINKAGE.length;
-  const cell = 64, padL = 66, padB = 52, padT = 16, padR = 8;
-  const W = padL + ncol * cell + padR, H = padT + nrow * cell + padB;
-
-  return (
-    <div style={{ background: MC.card, border: `1px solid ${MC.cardBorder}`, borderRadius: 10, padding: 18, marginTop: 18 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
-        <div style={{ maxWidth: 520 }}>
-          <div style={{ color: MC.text, fontSize: 14, fontWeight: 700, letterSpacing: "0.04em" }}>BELIEF SURFACE — MEDIAN PRICE (×START)</div>
-          <div style={{ color: MC.muted, fontSize: 13, marginTop: 5, lineHeight: 1.6 }}>
-            How the median outcome moves across the two assumptions no data can pin:
-            fundamentals-linkage strength and buy-side impact. Crossover gain held at {crossoverGain.toFixed(2)}.
-            The spread across this grid is the honest message — much of any result is
-            authored by belief, not forced by the calibrated mechanics.
-          </div>
-        </div>
-        <button
-          onClick={compute}
-          disabled={running}
-          style={{
-            background: running ? MC.veryDim : MC.gold, color: running ? MC.muted : "#111",
-            border: "none", borderRadius: 6, padding: "9px 16px", fontSize: 12, fontWeight: 700,
-            letterSpacing: "0.05em", cursor: running ? "default" : "pointer", whiteSpace: "nowrap",
-          }}
-        >
-          {running ? "COMPUTING…" : grid ? "RECOMPUTE SURFACE" : "COMPUTE SURFACE"}
-        </button>
-      </div>
-
-      {!grid && !running && (
-        <div style={{ color: MC.dim, fontSize: 12, padding: "28px 0", textAlign: "center" }}>
-          Surface is computed on demand (25 cells × {numSimsPerCell} paths). Press “Compute Surface”.
-        </div>
-      )}
-      {running && (
-        <div style={{ color: MC.gold, fontSize: 12, padding: "28px 0", textAlign: "center", letterSpacing: "0.08em" }}>
-          COMPUTING SURFACE — 25 CELLS…
-        </div>
-      )}
-
-      {grid && (
-        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 520, marginTop: 12 }} fontFamily="inherit">
-          {grid.map((row, ri) => {
-            const yrow = nrow - 1 - ri;
-            return row.map((m, ci) => {
-              const x = padL + ci * cell, y = padT + yrow * cell;
-              const isCorner = ri === nrow - 1 && ci === ncol - 1;
-              return (
-                <g key={`${ri}-${ci}`}>
-                  <rect x={x} y={y} width={cell - 3} height={cell - 3} rx={4} fill={mcSurfaceColor(m)} />
-                  {isCorner && (
-                    <>
-                      <rect x={x} y={y} width={cell - 3} height={cell - 3} rx={4} fill="#0d0d0f" opacity={0.62} />
-                      <rect x={x} y={y} width={cell - 3} height={cell - 3} rx={4} fill="none" stroke="#888" strokeDasharray="4 3" />
-                    </>
-                  )}
-                  <text x={x + (cell - 3) / 2} y={y + (cell - 3) / 2 + 4} fill={isCorner ? "#bbb" : "#111"}
-                    fontSize={13} fontWeight={700} textAnchor="middle">{m.toFixed(2)}×</text>
-                </g>
-              );
-            });
-          })}
-          {/* x axis */}
-          {MC_SURFACE_LINKAGE.map((l, ci) => (
-            <text key={`x${ci}`} x={padL + ci * cell + (cell - 3) / 2} y={padT + nrow * cell + 16}
-              fill={MC.muted} fontSize={10} textAnchor="middle">{l.toFixed(2)}</text>
-          ))}
-          <text x={padL + ncol * cell / 2} y={padT + nrow * cell + 36} fill={MC.subtle} fontSize={11}
-            textAnchor="middle" fontWeight={600}>Fundamentals-linkage (assumed)</text>
-          {/* y axis */}
-          {MC_SURFACE_BUY.map((b, ri) => {
-            const yrow = nrow - 1 - ri;
-            return (
-              <text key={`y${ri}`} x={padL - 10} y={padT + yrow * cell + (cell - 3) / 2 + 4}
-                fill={MC.muted} fontSize={10} textAnchor="end">{b.toFixed(2)}</text>
-            );
-          })}
-          <text x={16} y={padT + nrow * cell / 2} fill={MC.subtle} fontSize={11} fontWeight={600}
-            textAnchor="middle" transform={`rotate(-90 16 ${padT + nrow * cell / 2})`}>Buy-side impact (assumed)</text>
-        </svg>
-      )}
-
-      {grid && (
-        <div style={{ color: MC.muted, fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
-          Dashed top-right cell = the triple-optimistic corner (both axes maxed): the
-          most spectacular number and the <b>least-supported</b> — three hopeful
-          assumptions at once. It is shown, not hidden, but greyed so it cannot be
-          mistaken for the headline.
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Monte Carlo Tab (13 variables · Rev 3 · structural) ─────────────────────
+// ─── Market-Flow Sensitivity Tab (10 variables · Rev 4) ─────────────────────
 function MonteCarloTab({ price: livePrice }) {
   const FALLBACK_PRICE = 0.00929; // keep in sync with fetchAukiPrice fallback
   const startPrice = livePrice || FALLBACK_PRICE;
@@ -1735,84 +1483,34 @@ function MonteCarloTab({ price: livePrice }) {
   const NUM_SIMS = 1000; // Fix #7: increased from 500 for stable tail estimates
   const [months, setMonths] = useState(36);
 
-  // === THE 10 CORE VARIABLES ===
+  // === THE 10 VISIBLE VARIABLES ===
   // Market Structure
   const [cexCoverageScore, setCexCoverageScore] = useState(2);
   const [dexDailyVolume, setDexDailyVolume] = useState(20000);
   const [liquidityDepth, setLiquidityDepth] = useState(580000);
-  // Fundamentals
-  // networkEconActivity is retained as a FIXED internal value (today's baseline).
-  // Its old slider was removed: the Application Revenue → buyback lever supersedes
-  // it as the way usage connects to price. It still feeds the maturity crossover at
-  // today's low level (maturity ≈ 0), which is correct for today's reality.
-  const [networkEconActivity] = useState(25000);
+  // Supply / flow + dynamics
   const [unlockSellPressure, setUnlockSellPressure] = useState(35);
-  const [openMarketBuybackUsd, setOpenMarketBuybackUsd] = useState(0);  // $/mo revenue-funded open-market buys; 0 = today's reality
-  const [networkUsageGrowth, setNetworkUsageGrowth] = useState(8);
-  const [activeWalletGrowth, setActiveWalletGrowth] = useState(5);
-  // Market Dynamics
   const [buySellImbalance, setBuySellImbalance] = useState(1.0);
   const [btcCorrelation, setBtcCorrelation] = useState(0.48);  // CALIBRATED: AUKI–BTC return corr from data
   const [volatility30d, setVolatility30d] = useState(30);  // CALIBRATED: AUKI realized ~47%/mo = slider max
+  const [btcAnnualReturn, setBtcAnnualReturn] = useState(0.15);     // BTC Scenario — macro-conditions knob
 
-  // === 3 NEW REVIEW VARIABLES (Fixes #1, #2, #6) ===
-  const [burnEfficiency, setBurnEfficiency] = useState(0.5);        // Var 11 (Fix #2)
-  const [btcAnnualReturn, setBtcAnnualReturn] = useState(0.15);     // Var 12 (Fix #6)
-  const [supplyElasticity, setSupplyElasticity] = useState(0.30);   // Var 13 (Fix #1)
-
-  // ── Ecosystem inputs (Stage 7a) — FUTURE-STATE / ASSUMED. Default 0 = today's
-  // reality (only Auki's own apps use the protocol; no live buyback, no operators).
+  // ── App-revenue buyback (the one value-capture wire) — default 0 = today's
+  // reality (only Auki's own apps use the protocol; no live buyback).
   const [monthlyRevenueUsd, setMonthlyRevenueUsd] = useState(0);  // application revenue, fiat $/mo
   const [diversionPct, setDiversionPct] = useState(30);           // POLICY: % of revenue → open-market buyback
-  const [ecoDau, setEcoDau] = useState(0);                        // external daily active users
-  const [ecoNodes, setEcoNodes] = useState(0);                    // decentralized operator nodes
-  const [predictiveStakeUsd, setPredictiveStakeUsd] = useState(0); // app-dev predictive stake locked $
 
-  // Run simulation (off main thread via Web Worker)
+  // Run simulation
   const { sims, running: simRunning } = useMCWorker({
     months, startPrice,
     cexCoverageScore, dexDailyVolume, liquidityDepth,
-    networkEconActivity, unlockSellPressure, openMarketBuybackUsd, networkUsageGrowth,
-    activeWalletGrowth, buySellImbalance, btcCorrelation, volatility30d,
-    burnEfficiency, btcAnnualReturn, supplyElasticity,
-    monthlyRevenueUsd, diversionPct, ecoDau, ecoNodes, predictiveStakeUsd,
+    unlockSellPressure,
+    buySellImbalance, btcCorrelation, volatility30d,
+    btcAnnualReturn,
+    monthlyRevenueUsd, diversionPct,
   }, NUM_SIMS);
 
   const summary = useMemo(() => sims ? mcSummary(sims, months, startPrice) : null, [sims, months, startPrice]);
-
-  // Params snapshot for the belief surface (mirrors the live scenario; the surface
-  // overrides the three belief axes itself). Ecosystem inputs default to today (0).
-  const surfaceBaseParams = useMemo(() => ({
-    months, startPrice,
-    cexCoverageScore, dexDailyVolume, liquidityDepth,
-    networkEconActivity, unlockSellPressure, openMarketBuybackUsd, networkUsageGrowth,
-    activeWalletGrowth, buySellImbalance, btcCorrelation, volatility30d,
-    burnEfficiency, btcAnnualReturn, supplyElasticity,
-    monthlyRevenueUsd, diversionPct, ecoDau, ecoNodes, predictiveStakeUsd,
-  }), [months, startPrice, cexCoverageScore, dexDailyVolume, liquidityDepth,
-    networkEconActivity, unlockSellPressure, openMarketBuybackUsd, networkUsageGrowth,
-    activeWalletGrowth, buySellImbalance, btcCorrelation, volatility30d,
-    burnEfficiency, btcAnnualReturn, supplyElasticity,
-    monthlyRevenueUsd, diversionPct, ecoDau, ecoNodes, predictiveStakeUsd]);
-  const medianSim = useMemo(() => {
-    if (!sims || !sims.length) return null;
-    const p50price = mcPercentiles(sims, "price", months).p50;
-    return sims.reduce((best, sim) => {
-      const termPrice = sim[months]?.price ?? 0;
-      const bestPrice = best[months]?.price ?? 0;
-      return Math.abs(termPrice - p50price) < Math.abs(bestPrice - p50price) ? sim : best;
-    });
-  }, [sims, months]);
-
-  // Deflation timeline
-  const deflationTimeline = useMemo(() => {
-    if (!sims || !sims.length) return [];
-    return [9e9, 8e9, 7.5e9, 7e9, 6e9, 5.5e9, 5e9].map((target) => {
-      const arr = sims.map((s) => { const i = s.findIndex((d) => d.totalSupply <= target); return i >= 0 ? i : Infinity; }).sort((a, b) => a - b);
-      const med = arr[Math.floor(arr.length / 2)];
-      return { target, months: med === Infinity ? null : med, label: mcFmtB(target) };
-    });
-  }, [sims]);
 
   // Liquidity stress — uses the user's liquidity depth setting
   const liqStress = [10000, 25000, 50000, 100000, 250000, 500000].map((sz) => ({
@@ -1878,7 +1576,7 @@ function MonteCarloTab({ price: livePrice }) {
       {/* ─── Variables Panel ───────────────────────────────────────── */}
       <div style={{ background: MC.card, border: `1px solid ${MC.cardBorder}`, borderRadius: 10, padding: "18px 22px", marginBottom: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-          <span style={{ fontSize: 14, color: MC.subtle, letterSpacing: "0.1em", fontWeight: 700, ...M }}>⚙️ 12 SIMULATION VARIABLES</span>
+          <span style={{ fontSize: 14, color: MC.subtle, letterSpacing: "0.1em", fontWeight: 700, ...M }}>⚙️ 10 MARKET-FLOW VARIABLES</span>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 11, color: MC.dim, ...M }}>HORIZON</span>
             <select value={months} onChange={(e) => setMonths(Number(e.target.value))}
@@ -1888,84 +1586,65 @@ function MonteCarloTab({ price: livePrice }) {
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 24 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 24 }}>
           {/* Column 1: Market Structure */}
           <div>
             <div style={{ fontSize: 11, color: MC.subtle, letterSpacing: "0.1em", ...M, marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${MC.border}` }}>MARKET STRUCTURE</div>
             <MCSlider label="1 · CEX COVERAGE SCORE" value={cexCoverageScore} onChange={setCexCoverageScore}
               min={1} max={10} step={1} format={(v) => `${v}/10`}
-              tip="Number, quality, and liquidity of exchanges listing AUKI. 1 = MEXC only. 5 = several mid-tier CEXes. 10 = Binance + Coinbase. Higher = more accessibility, institutional reach, and liquidity." />
+              tip="Number, quality, and liquidity of exchanges listing AUKI. 1 = MEXC only. 5 = several mid-tier CEXes. 10 = Binance + Coinbase. Higher = deeper effective liquidity. NOTE: a deeper market also DAMPENS a fixed-dollar buyback's price impact — raising coverage tightens the outcome range and can lower the median when the buyback is large." />
             <MCSlider label="2 · DEX DAILY VOLUME" value={dexDailyVolume} onChange={setDexDailyVolume}
               min={1000} max={500000} step={1000} format={mcFmtUsd}
-              tip="On-chain $AUKI trading activity across DEXes (Uniswap, PancakeSwap, Aerodrome). Strongest signal of organic market participation. Current: ~$15–25K/day." />
+              tip="On-chain $AUKI trading activity across DEXes (Uniswap, PancakeSwap, Aerodrome). A market-structure indicator shown for context; current ~$15–25K/day." />
             <MCSlider label="3 · LIQUIDITY DEPTH (±2%)" value={liquidityDepth} onChange={setLiquidityDepth}
               min={50000} max={5000000} step={10000} format={mcFmtUsd}
-              tip="USD liquidity available within a tight ±2% price range. Determines slippage, volatility resistance, and market stability. Current: ~$580K total DEX TVL." />
+              tip="USD liquidity within a tight ±2% price range. Determines slippage, volatility resistance, and how hard both unlock selling and buybacks move price. Current: ~$580K total DEX TVL." />
           </div>
 
-          {/* Column 2: Fundamentals */}
+          {/* Column 2: Supply / Flow + Dynamics */}
           <div>
-            <div style={{ fontSize: 11, color: MC.subtle, letterSpacing: "0.1em", ...M, marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${MC.border}` }}>FUNDAMENTALS</div>
+            <div style={{ fontSize: 11, color: MC.subtle, letterSpacing: "0.1em", ...M, marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${MC.border}` }}>SUPPLY / FLOW &amp; DYNAMICS</div>
             <MCSlider label="4 · UNLOCK SELL PRESSURE" value={unlockSellPressure} onChange={setUnlockSellPressure}
               min={0} max={100} step={5} format={(v) => `${v}%`}
-              tip="Estimated % of unlocked/vested tokens sold into the market. Models real supply shock and market absorption risk. 20% = holders hold. 60% = heavy dumping." />
-            <MCSlider label="5 · NETWORK USAGE GROWTH" value={networkUsageGrowth} onChange={setNetworkUsageGrowth}
-              min={0} max={30} step={1} format={(v) => `${v}%/mo`}
-              tip="Growth in protocol usage. Logistic curve — rate decays as activity approaches $10M/mo carrying capacity. 8%/mo doubles activity in ~9 months." />
-            <MCSlider label="6 · ACTIVE WALLET GROWTH" value={activeWalletGrowth} onChange={setActiveWalletGrowth}
-              min={0} max={30} step={1} format={(v) => `${v}%/mo`}
-              tip="Growth in unique wallets. Logistic curve — rate decays as wallets approach 5M ceiling. Sub-linear elasticities: burns (0.8), liquidity (0.5), staking (0.6)." />
-          </div>
-
-          {/* Column 3: Market Dynamics */}
-          <div>
-            <div style={{ fontSize: 11, color: MC.subtle, letterSpacing: "0.1em", ...M, marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${MC.border}` }}>MARKET DYNAMICS</div>
-            <MCSlider label="7 · BUY/SELL IMBALANCE" value={buySellImbalance} onChange={setBuySellImbalance}
+              tip="Estimated % of unlocked/vested tokens sold into the market — the model's dominant downward force. 20% = holders hold. 60% = heavy dumping. Rises ×1.5 in stress regimes." />
+            <MCSlider label="5 · BUY/SELL IMBALANCE" value={buySellImbalance} onChange={setBuySellImbalance}
               min={0.5} max={1.5} step={0.05} format={(v) => v.toFixed(2)}
-              tip="Ratio of buying pressure to selling pressure. >1 = net accumulation (bullish). <1 = net distribution (bearish). 1.0 = balanced. Reveals market sentiment." />
-            <MCSlider label="8 · BTC CORRELATION" value={btcCorrelation} onChange={setBtcCorrelation}
+              tip="Ratio of buying to selling pressure in the dynamics channel. >1 = net accumulation (bullish). <1 = net distribution. 1.0 = balanced." />
+            <MCSlider label="6 · BTC CORRELATION" value={btcCorrelation} onChange={setBtcCorrelation}
               min={0} max={1} step={0.05} format={(v) => v.toFixed(2)}
-              tip="Degree to which AUKI price follows Bitcoin. 0 = fully independent. 1 = moves 1:1 with BTC. Higher = more dependence on broader crypto market cycles." />
-            <MCSlider label="9 · 30-DAY VOLATILITY" value={volatility30d} onChange={setVolatility30d}
-              min={1} max={30} step={1} format={(v) => `${v}%`}
-              tip="Rolling 30-day price volatility. Core risk metric for stress testing and uncertainty modelling. 5% = stable. 15% = volatile. 25% = extreme." />
+              tip="Degree to which AUKI follows Bitcoin. 0 = independent. 1 = moves 1:1 with BTC. Pulled toward 0.85 in stress regimes. Calibrated default 0.48." />
           </div>
 
-          {/* Column 4: Model Calibration (Review fixes #1, #2, #6) */}
+          {/* Column 3: Market / Macro */}
           <div>
-            <div style={{ fontSize: 11, color: MC.subtle, letterSpacing: "0.1em", ...M, marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${MC.border}` }}>MODEL CALIBRATION</div>
-            <MCSlider label="10 · BURN EFFICIENCY" value={burnEfficiency} onChange={setBurnEfficiency}
-              min={0.1} max={1.0} step={0.05} format={(v) => `${(v * 100).toFixed(0)}%`}
-              tip="Fraction of network economic activity that actually reaches the burn mechanism after protocol fees, conversion delays, and failed transactions. 40% = conservative. 80% = optimistic. 100% = theoretical maximum." />
-            <MCSlider label="11 · BTC EXPECTED RETURN" value={btcAnnualReturn} onChange={setBtcAnnualReturn}
+            <div style={{ fontSize: 11, color: MC.subtle, letterSpacing: "0.1em", ...M, marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${MC.border}` }}>MARKET / MACRO</div>
+            <MCSlider label="7 · 30-DAY VOLATILITY" value={volatility30d} onChange={setVolatility30d}
+              min={1} max={30} step={1} format={(v) => `${v}%`}
+              tip="Rolling 30-day idiosyncratic volatility. Core risk metric. Default at max ≈ AUKI's measured ~47%/mo realized volatility. Amplified by thin liquidity and stress regimes." />
+            <MCSlider label="8 · BTC SCENARIO" value={btcAnnualReturn} onChange={setBtcAnnualReturn}
               min={-0.50} max={0.80} step={0.05} format={(v) => `${(v * 100).toFixed(0)}%/yr`}
-              tip="Expected annual BTC return assumption. Bear: -30% to -50%. Base: +15%. Bull: +50% to +80%. This drift is embedded in every path — it's the market regime assumption." />
-            <MCSlider label="12 · SUPPLY ELASTICITY" value={supplyElasticity} onChange={setSupplyElasticity}
-              min={0.05} max={0.50} step={0.05} format={(v) => v.toFixed(2)}
-              tip="How much price responds to supply burns. 0.30 = markets price 30% of supply shock immediately (conservative). 0.50 = half priced in. Higher = stronger burn→price feedback." />
+              tip="The market-conditions knob: expected annual BTC return embedded in every path. Bear: −30% to −50%. Base: +15%. Bull: +50% to +80%. This is how you stress 'can buybacks offset selling under different market conditions'." />
           </div>
         </div>
 
-        {/* ─── Ecosystem inputs — ASSUMED / FUTURE-STATE (Stage 7a/7c) ──── */}
-        {/* Visually separated from the calibrated inputs above to keep the seam */}
-        {/* visible: these are projections of a network that has not yet scaled. */}
+        {/* ─── App-revenue buyback policy — the only value-capture wire ──── */}
         <div style={{ marginTop: 22, padding: 16, border: `1px solid ${MC.purple}`, borderRadius: 10, background: "rgba(196,122,181,0.05)" }}>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
-            <div style={{ fontSize: 11, color: MC.purple, letterSpacing: "0.12em", ...M, fontWeight: 700 }}>APPLICATION REVENUE · ASSUMED / FORWARD-LOOKING</div>
-            <div style={{ fontSize: 12, color: MC.muted, ...M }}>default 0 = today (only Auki's apps use the protocol)</div>
+            <div style={{ fontSize: 11, color: MC.purple, letterSpacing: "0.12em", ...M, fontWeight: 700 }}>APPLICATION REVENUE → OPEN-MARKET BUYBACK</div>
+            <div style={{ fontSize: 12, color: MC.muted, ...M }}>default $0 buyback = current state</div>
           </div>
           <div style={{ fontSize: 13, color: MC.muted, lineHeight: 1.6, marginBottom: 14, maxWidth: 760 }}>
-            These inputs are <b>not calibrated</b> — they project a network that has not yet scaled. They drive the
-            price through the open-market buyback (revenue × diversion), via the same calibrated liquidity
-            mechanism the sell side uses. At $0 revenue the model reproduces today's reality exactly.
+            This is the model's only value-capture wire. It does not assume third-party protocol adoption,
+            burns, credits or contributor economics. It asks how much Auki-controlled app revenue, if diverted
+            into open-market token purchases, matters against unlock selling and available liquidity.
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 24 }}>
             <MCSlider label="APPLICATION REVENUE (USD)" value={monthlyRevenueUsd} onChange={setMonthlyRevenueUsd}
               min={0} max={5000000} step={50000} format={(v) => v === 0 ? "$0 (today)" : mcFmtUsd(v) + "/mo"}
-              tip="Monthly fiat revenue from applications running on the network. This is the dollars-in figure — whether from one large client or many small ones is irrelevant to the token; only the dollar total matters." />
+              tip="Monthly fiat revenue from Auki-controlled applications. This is not third-party protocol activity; it is the revenue base that could fund an open-market buyback policy." />
             <MCSlider label="DIVERSION → BUYBACK (POLICY)" value={diversionPct} onChange={setDiversionPct}
               min={0} max={100} step={5} format={(v) => `${v}%`}
-              tip="POLICY CHOICE (not a market outcome): the % of revenue routed to buying $AUKI on the OPEN MARKET and burning it. Open-market buys move price; treasury-sourced burns would not. This dial is the single most important policy lever — shown here as policy, set by Auki, not derived." />
+              tip="POLICY CHOICE (not a market outcome): the % of revenue routed to buying $AUKI on the OPEN MARKET. Open-market buys can affect price through liquidity; treasury-sourced burns would not create the same market-flow effect. This dial is the single most important policy lever — shown here as policy, set by Auki, not derived." />
             <MCSlider label="OPEN-MARKET BUYBACK $/MO" value={Math.round(monthlyRevenueUsd * diversionPct / 100)} onChange={() => {}}
               min={0} max={5000000} step={1} format={(v) => mcFmtUsd(v) + "/mo"}
               tip="Computed = revenue × diversion%. This is the actual monthly open-market buy pressure the engine applies (read-only; set the two sliders to the left)." />
@@ -1987,34 +1666,8 @@ function MonteCarloTab({ price: livePrice }) {
         </div>
       </MCSection>
 
-      {/* ─── Belief Surface (Stage 6) — honest headline beside the fan ──── */}
-      <MCBeliefSurface baseParams={surfaceBaseParams} numSimsPerCell={600} crossoverGain={1.0} />
-
-      {/* ─── 2. Supply Deflation ───────────────────────────────────── */}
-      <MCSection title="2 · SUPPLY DEFLATION" explanation="The burn-credit-mint mechanism destroys tokens when services are used, while minting fewer as rewards. Supply approaches an asymptotic floor of 5B — the closer it gets, the slower deflation becomes.">
-        <MCFanChart sims={sims} field="totalSupply" label="TOTAL SUPPLY — TOWARD 5B FLOOR" formatter={mcFmtB} height={160} color={MC.blue} />
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 10 }}>
-          <MCMetric label="CURRENT SUPPLY" value={mcFmtB(9_990_593_505)} sub={`${mcFmtB(TOTAL_SUPPLY - 9_990_593_505)} burned`} accent={MC.blue} />
-          <MCMetric label="BURN/MO (MO 12)" value={mcFmtB(mcPercentiles(sims, "tokensBurned", Math.min(12, months)).p50)} accent={MC.red} />
-          <MCMetric label="NET DEFLATION/MO" value={mcFmtB(mcPercentiles(sims, "netDeflation", Math.min(12, months)).p50)} accent={MC.green} />
-          <MCMetric label={`SUPPLY AT ${mcFmtMo(months)}`} value={mcFmtB(summary.fs.p50)} accent={MC.blue} />
-        </div>
-      </MCSection>
-
-      {/* ─── 3. Treasury Runway ────────────────────────────────────── */}
-      {/* ─── 3. Treasury Runway — HIDDEN from dashboard per design (code retained) ───
-      <MCSection title="TREASURY RUNWAY" explanation="Foundation treasury funded by 18.74% allocation (7-year vesting) plus protocol tax on every mint. Used for operations, grants, and node participation rewards.">
-        <MCFanChart sims={sims} field="treasuryBalance" label="TREASURY VALUE (USD)" formatter={mcFmtUsd} height={140} color={MC.gold} />
-      </MCSection>
-      ─────────────────────────────────────────────────────────────────────────── */}
-
-      {/* ─── 3. Circulating Supply ─────────────────────────────────── */}
-      <MCSection title="3 · CIRCULATING SUPPLY" explanation="Effective circulating supply = vested tokens minus staked minus burned. This is the actual free-floating supply available for trading.">
-        <MCFanChart sims={sims} field="circulatingSupply" label="EFFECTIVE CIRCULATING SUPPLY" formatter={mcFmtB} height={140} color={MC.purple} />
-      </MCSection>
-
-      {/* ─── 5. Unlock Sell Pressure ───────────────────────────────── */}
-      <MCSection title="4 · VESTING UNLOCK SELL PRESSURE" explanation="When tokens vest, holders can sell. Pre-sale 2 and Advisors fully unlock ~Aug 2026. Team tokens have a 6-month cliff then 42 months linear vesting.">
+      {/* ─── 2 · Vesting Unlock Sell Pressure (the dominant sell-side force) ──── */}
+      <MCSection title="2 · VESTING UNLOCK SELL PRESSURE" explanation="When tokens vest, holders can sell. This is the dominant downward force in the model. Pre-sale 2 and Advisors fully unlock ~Aug 2026. Team tokens have a 6-month cliff then 42 months linear vesting. Sell pressure rises in stress regimes (capitulation).">
         <div style={{ display: "flex", gap: 4, alignItems: "flex-end", height: 100, marginBottom: 12 }}>
           {unlockData.map((d, i) => {
             const max = Math.max(...unlockData.map((x) => x.unlocks), 1);
@@ -2030,8 +1683,8 @@ function MonteCarloTab({ price: livePrice }) {
         <MCFanChart sims={sims} field="sellPressureUsd" label="SELL PRESSURE FROM UNLOCKS (USD)" formatter={mcFmtUsd} height={120} color={MC.red} />
       </MCSection>
 
-      {/* ─── 6. Liquidity Stress ───────────────────────────────────── */}
-      <MCSection title="5 · LIQUIDITY STRESS TEST" explanation={`With ~${mcFmtUsd(liquidityDepth)} liquidity depth, large sells cause slippage. Estimated price impact for different sell sizes at current depth.`}>
+      {/* ─── 3 · Liquidity Stress Test ──────────────────────────────── */}
+      <MCSection title="3 · LIQUIDITY STRESS TEST" explanation={`With ~${mcFmtUsd(liquidityDepth)} liquidity depth, large sells cause slippage. Estimated price impact for different sell sizes at current depth. This is the channel through which both unlock selling and revenue-funded buybacks act.`}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8 }}>
           {liqStress.map((l) => (
             <div key={l.size} style={{ textAlign: "center", background: "#0D1117", borderRadius: 6, padding: "10px 6px" }}>
@@ -2042,60 +1695,14 @@ function MonteCarloTab({ price: livePrice }) {
         </div>
       </MCSection>
 
-      {/* ─── 7. Burn Feedback Loop ─────────────────────────────────── */}
-      <MCSection title="6 · BURN → DEFLATION LOOP" explanation="More network usage → more burns → less supply → value accrual. The mint side creates fewer tokens than burned, approaching 1:1 as supply nears 5B.">
-        <MCFanChart sims={sims} field="tokensBurned" label="MONTHLY TOKENS BURNED" formatter={mcFmtB} height={130} color={MC.green} />
-        <MCFanChart sims={sims} field="tokensMinted" label="MONTHLY TOKENS MINTED (REWARDS)" formatter={mcFmtB} height={130} color={MC.purple} />
-      </MCSection>
-
-      {/* ─── 8. Staking vs Float ───────────────────────────────────── */}
-      <MCSection title="7 · STAKING vs FLOAT" explanation="Tokens staked in node contracts are locked and removed from circulation. Staking participation grows with active wallet growth.">
-        <MCFanChart sims={sims} field="stakedTokens" label="STAKED TOKENS" formatter={mcFmtB} height={130} color={MC.green} />
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 10 }}>
-          <MCMetric label="STAKED NOW" value={mcFmtB(mcPercentiles(sims, "stakedTokens", 0).p50)} accent={MC.green} />
-          <MCMetric label={`STAKED AT ${mcFmtMo(months)}`} value={mcFmtB(mcPercentiles(sims, "stakedTokens", months).p50)} accent={MC.green} />
-          <MCMetric label="EFFECTIVE FLOAT" value={mcFmtB(summary.fc.p50)} sub="Circ − Staked − Burned" accent={MC.purple} />
-        </div>
-      </MCSection>
-
-      {/* ─── 9. Reward Pool ────────────────────────────────────────── */}
-      <MCSection title="8 · REWARD POOL HEALTH" explanation="Pays node operators. Replenished by deflationary mints, drained by operator claims. If depleted, Foundation must step in.">
-        <MCFanChart sims={sims} field="rewardPool" label="REWARD POOL (TOKENS)" formatter={mcFmtB} height={130} color={MC.gold} />
-      </MCSection>
-
-      {/* ─── 10. Node Break-Even ───────────────────────────────────── */}
-      <MCSection title="9 · NODE OPERATOR BREAK-EVEN" explanation="Can you profitably run a posemesh node? Models monthly USD reward per node vs ~$50/month operating cost.">
-        <MCFanChart sims={sims} field="nodeROI" label="MONTHLY NODE ROI (%)" formatter={mcFmtPct} height={120} color={MC.green} showZero />
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 10 }}>
-          <MCMetric label="NODE COST (EST)" value="$50/mo" accent={MC.muted} />
-          <MCMetric label={`ROI AT ${mcFmtMo(months)}`} value={mcFmtPct(mcPercentiles(sims, "nodeROI", months).p50)} accent={mcPercentiles(sims, "nodeROI", months).p50 > 0 ? MC.green : MC.red} />
-          <MCMetric label="BREAK-EVEN" value={(() => { const i = medianSim?.findIndex((d) => d.nodeROI > 0); return i >= 0 ? `Month ${i}` : `>${mcFmtMo(months)}`; })()} accent={MC.gold} />
-        </div>
-      </MCSection>
-
-      {/* ─── 11. Deflation Timeline ────────────────────────────────── */}
-      <MCSection title="10 · DEFLATION TIMELINE" explanation="Estimated time to reach each supply milestone. Deflation is asymptotic — approaching 5B gets exponentially harder.">
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${deflationTimeline.length}, 1fr)`, gap: 8 }}>
-          {deflationTimeline.map((t) => (
-            <div key={t.target} style={{ background: "#0D1117", border: `1px solid ${MC.cardBorder}`, borderRadius: 8, padding: "14px 10px", textAlign: "center" }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: MC.text, ...M }}>{t.label}</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: t.months != null ? MC.gold : MC.veryDim, ...M, marginTop: 8 }}>
-                {t.months != null ? mcFmtMo(t.months) : `>${mcFmtMo(months)}`}
-              </div>
-            </div>
-          ))}
-        </div>
-      </MCSection>
-
-      {/* ─── 12. Market Cap ────────────────────────────────────────── */}
-      <MCSection title="11 · MARKET CAP PROJECTION" explanation="Market cap = price × circulating supply. FDV = price × total supply.">
+      {/* ─── 4 · Market Cap ─────────────────────────────────────────── */}
+      <MCSection title="4 · MARKET CAP PROJECTION" explanation="Market cap = price × circulating supply (vested − staked). FDV = price × total supply. Supply is held static in this market-flow model — these track price, not token destruction.">
         <MCFanChart sims={sims} field="marketCap" label="MARKET CAP (USD)" formatter={mcFmtUsd} height={140} color={MC.gold} />
         <MCFanChart sims={sims} field="fdv" label="FULLY DILUTED VALUATION (USD)" formatter={mcFmtUsd} height={140} color={MC.purple} />
       </MCSection>
-
       {/* ─── Footer ────────────────────────────────────────────────── */}
       <div style={{ textAlign: "center", padding: "20px 0", color: MC.veryDim, fontSize: 11, ...M, letterSpacing: "0.1em" }}>
-        PRICE SENSITIVITY · {NUM_SIMS} PATHS · {mcFmtMo(months)} · 12 VARIABLES · SCENARIO SIMULATION · NOT FINANCIAL ADVICE
+        PRICE SENSITIVITY · MARKET-FLOW MODEL · {NUM_SIMS} PATHS · {mcFmtMo(months)} · 10 VARIABLES · SCENARIO SIMULATION · NOT FINANCIAL ADVICE
       </div>
     </div>
   );

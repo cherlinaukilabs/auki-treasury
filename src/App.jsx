@@ -1393,7 +1393,7 @@ function MCDiagnostics({ sims, months, startPrice }) {
       </div>
 
       <div style={{ background: "#0D1117", border: `1px solid ${MC.cardBorder}`, borderRadius: 8, padding: "14px 16px", marginBottom: 12 }}>
-        <div style={{ fontSize: 11, color: MC.muted, ...M, lineHeight: 1.6 }}>
+        <div style={{ fontSize: 13, color: MC.muted, ...M, lineHeight: 1.65 }}>
           <strong style={{ color: MC.text }}>{up.pct.toFixed(1)}%</strong> of {sims.length.toLocaleString()} modelled scenarios end above
           today's price — but that figure carries sampling error. The true value (given these assumptions)
           lies in <strong style={{ color: MC.gold }}>{up.ciLow.toFixed(1)}%–{up.ciHigh.toFixed(1)}%</strong> with
@@ -1409,7 +1409,7 @@ function MCDiagnostics({ sims, months, startPrice }) {
 
       <div style={{ background: "#0D1117", border: `1px solid ${MC.cardBorder}`, borderRadius: 8, padding: "14px 16px" }}>
         <div style={{ fontSize: 11, color: MC.red, letterSpacing: "0.08em", ...M, marginBottom: 8, fontWeight: 700 }}>⚠ ASSUMED — NOT CALIBRATED TO AUKI DATA</div>
-        <div style={{ fontSize: 10.5, color: MC.muted, ...M, lineHeight: 1.6, marginBottom: 10 }}>
+        <div style={{ fontSize: 13, color: MC.muted, ...M, lineHeight: 1.65, marginBottom: 10 }}>
           AUKI has &lt;2 years of thin price history — not enough to fit these. They are chosen for reasonable
           magnitude and directional logic. Treat the model as a transparent assumption engine, not a forecast.
           Move the sliders; watch how much the output depends on these choices.
@@ -1642,7 +1642,7 @@ function MCBeliefSurface({ baseParams, numSimsPerCell = 600, crossoverGain = 1.0
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
         <div style={{ maxWidth: 520 }}>
           <div style={{ color: MC.text, fontSize: 14, fontWeight: 700, letterSpacing: "0.04em" }}>BELIEF SURFACE — MEDIAN PRICE (×START)</div>
-          <div style={{ color: MC.muted, fontSize: 11.5, marginTop: 5, lineHeight: 1.5 }}>
+          <div style={{ color: MC.muted, fontSize: 13, marginTop: 5, lineHeight: 1.6 }}>
             How the median outcome moves across the two assumptions no data can pin:
             fundamentals-linkage strength and buy-side impact. Crossover gain held at {crossoverGain.toFixed(2)}.
             The spread across this grid is the honest message — much of any result is
@@ -1878,7 +1878,7 @@ function MonteCarloTab({ price: livePrice }) {
       {/* ─── Variables Panel ───────────────────────────────────────── */}
       <div style={{ background: MC.card, border: `1px solid ${MC.cardBorder}`, borderRadius: 10, padding: "18px 22px", marginBottom: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-          <span style={{ fontSize: 14, color: MC.subtle, letterSpacing: "0.1em", fontWeight: 700, ...M }}>⚙️ 13 SIMULATION VARIABLES</span>
+          <span style={{ fontSize: 14, color: MC.subtle, letterSpacing: "0.1em", fontWeight: 700, ...M }}>⚙️ 12 SIMULATION VARIABLES</span>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 11, color: MC.dim, ...M }}>HORIZON</span>
             <select value={months} onChange={(e) => setMonths(Number(e.target.value))}
@@ -1906,13 +1906,13 @@ function MonteCarloTab({ price: livePrice }) {
           {/* Column 2: Fundamentals */}
           <div>
             <div style={{ fontSize: 11, color: MC.subtle, letterSpacing: "0.1em", ...M, marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${MC.border}` }}>FUNDAMENTALS</div>
-            <MCSlider label="5 · UNLOCK SELL PRESSURE" value={unlockSellPressure} onChange={setUnlockSellPressure}
+            <MCSlider label="4 · UNLOCK SELL PRESSURE" value={unlockSellPressure} onChange={setUnlockSellPressure}
               min={0} max={100} step={5} format={(v) => `${v}%`}
               tip="Estimated % of unlocked/vested tokens sold into the market. Models real supply shock and market absorption risk. 20% = holders hold. 60% = heavy dumping." />
-            <MCSlider label="6 · NETWORK USAGE GROWTH" value={networkUsageGrowth} onChange={setNetworkUsageGrowth}
+            <MCSlider label="5 · NETWORK USAGE GROWTH" value={networkUsageGrowth} onChange={setNetworkUsageGrowth}
               min={0} max={30} step={1} format={(v) => `${v}%/mo`}
               tip="Growth in protocol usage. Logistic curve — rate decays as activity approaches $10M/mo carrying capacity. 8%/mo doubles activity in ~9 months." />
-            <MCSlider label="7 · ACTIVE WALLET GROWTH" value={activeWalletGrowth} onChange={setActiveWalletGrowth}
+            <MCSlider label="6 · ACTIVE WALLET GROWTH" value={activeWalletGrowth} onChange={setActiveWalletGrowth}
               min={0} max={30} step={1} format={(v) => `${v}%/mo`}
               tip="Growth in unique wallets. Logistic curve — rate decays as wallets approach 5M ceiling. Sub-linear elasticities: burns (0.8), liquidity (0.5), staking (0.6)." />
           </div>
@@ -1920,13 +1920,13 @@ function MonteCarloTab({ price: livePrice }) {
           {/* Column 3: Market Dynamics */}
           <div>
             <div style={{ fontSize: 11, color: MC.subtle, letterSpacing: "0.1em", ...M, marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${MC.border}` }}>MARKET DYNAMICS</div>
-            <MCSlider label="8 · BUY/SELL IMBALANCE" value={buySellImbalance} onChange={setBuySellImbalance}
+            <MCSlider label="7 · BUY/SELL IMBALANCE" value={buySellImbalance} onChange={setBuySellImbalance}
               min={0.5} max={1.5} step={0.05} format={(v) => v.toFixed(2)}
               tip="Ratio of buying pressure to selling pressure. >1 = net accumulation (bullish). <1 = net distribution (bearish). 1.0 = balanced. Reveals market sentiment." />
-            <MCSlider label="9 · BTC CORRELATION" value={btcCorrelation} onChange={setBtcCorrelation}
+            <MCSlider label="8 · BTC CORRELATION" value={btcCorrelation} onChange={setBtcCorrelation}
               min={0} max={1} step={0.05} format={(v) => v.toFixed(2)}
               tip="Degree to which AUKI price follows Bitcoin. 0 = fully independent. 1 = moves 1:1 with BTC. Higher = more dependence on broader crypto market cycles." />
-            <MCSlider label="10 · 30-DAY VOLATILITY" value={volatility30d} onChange={setVolatility30d}
+            <MCSlider label="9 · 30-DAY VOLATILITY" value={volatility30d} onChange={setVolatility30d}
               min={1} max={30} step={1} format={(v) => `${v}%`}
               tip="Rolling 30-day price volatility. Core risk metric for stress testing and uncertainty modelling. 5% = stable. 15% = volatile. 25% = extreme." />
           </div>
@@ -1934,13 +1934,13 @@ function MonteCarloTab({ price: livePrice }) {
           {/* Column 4: Model Calibration (Review fixes #1, #2, #6) */}
           <div>
             <div style={{ fontSize: 11, color: MC.subtle, letterSpacing: "0.1em", ...M, marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${MC.border}` }}>MODEL CALIBRATION</div>
-            <MCSlider label="11 · BURN EFFICIENCY" value={burnEfficiency} onChange={setBurnEfficiency}
+            <MCSlider label="10 · BURN EFFICIENCY" value={burnEfficiency} onChange={setBurnEfficiency}
               min={0.1} max={1.0} step={0.05} format={(v) => `${(v * 100).toFixed(0)}%`}
               tip="Fraction of network economic activity that actually reaches the burn mechanism after protocol fees, conversion delays, and failed transactions. 40% = conservative. 80% = optimistic. 100% = theoretical maximum." />
-            <MCSlider label="12 · BTC EXPECTED RETURN" value={btcAnnualReturn} onChange={setBtcAnnualReturn}
+            <MCSlider label="11 · BTC EXPECTED RETURN" value={btcAnnualReturn} onChange={setBtcAnnualReturn}
               min={-0.50} max={0.80} step={0.05} format={(v) => `${(v * 100).toFixed(0)}%/yr`}
               tip="Expected annual BTC return assumption. Bear: -30% to -50%. Base: +15%. Bull: +50% to +80%. This drift is embedded in every path — it's the market regime assumption." />
-            <MCSlider label="13 · SUPPLY ELASTICITY" value={supplyElasticity} onChange={setSupplyElasticity}
+            <MCSlider label="12 · SUPPLY ELASTICITY" value={supplyElasticity} onChange={setSupplyElasticity}
               min={0.05} max={0.50} step={0.05} format={(v) => v.toFixed(2)}
               tip="How much price responds to supply burns. 0.30 = markets price 30% of supply shock immediately (conservative). 0.50 = half priced in. Higher = stronger burn→price feedback." />
           </div>
@@ -1952,9 +1952,9 @@ function MonteCarloTab({ price: livePrice }) {
         <div style={{ marginTop: 22, padding: 16, border: `1px solid ${MC.purple}`, borderRadius: 10, background: "rgba(196,122,181,0.05)" }}>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
             <div style={{ fontSize: 11, color: MC.purple, letterSpacing: "0.12em", ...M, fontWeight: 700 }}>APPLICATION REVENUE · ASSUMED / FORWARD-LOOKING</div>
-            <div style={{ fontSize: 10.5, color: MC.muted, ...M }}>default 0 = today (only Auki's apps use the protocol)</div>
+            <div style={{ fontSize: 12, color: MC.muted, ...M }}>default 0 = today (only Auki's apps use the protocol)</div>
           </div>
-          <div style={{ fontSize: 11, color: MC.muted, lineHeight: 1.5, marginBottom: 14, maxWidth: 760 }}>
+          <div style={{ fontSize: 13, color: MC.muted, lineHeight: 1.6, marginBottom: 14, maxWidth: 760 }}>
             These inputs are <b>not calibrated</b> — they project a network that has not yet scaled. They drive the
             price through the open-market buyback (revenue × diversion), via the same calibrated liquidity
             mechanism the sell side uses. At $0 revenue the model reproduces today's reality exactly.
@@ -2002,17 +2002,19 @@ function MonteCarloTab({ price: livePrice }) {
       </MCSection>
 
       {/* ─── 3. Treasury Runway ────────────────────────────────────── */}
-      <MCSection title="3 · TREASURY RUNWAY" explanation="Foundation treasury funded by 18.74% allocation (7-year vesting) plus protocol tax on every mint. Used for operations, grants, and node participation rewards.">
+      {/* ─── 3. Treasury Runway — HIDDEN from dashboard per design (code retained) ───
+      <MCSection title="TREASURY RUNWAY" explanation="Foundation treasury funded by 18.74% allocation (7-year vesting) plus protocol tax on every mint. Used for operations, grants, and node participation rewards.">
         <MCFanChart sims={sims} field="treasuryBalance" label="TREASURY VALUE (USD)" formatter={mcFmtUsd} height={140} color={MC.gold} />
       </MCSection>
+      ─────────────────────────────────────────────────────────────────────────── */}
 
-      {/* ─── 4. Circulating Supply ─────────────────────────────────── */}
-      <MCSection title="4 · CIRCULATING SUPPLY" explanation="Effective circulating supply = vested tokens minus staked minus burned. This is the actual free-floating supply available for trading.">
+      {/* ─── 3. Circulating Supply ─────────────────────────────────── */}
+      <MCSection title="3 · CIRCULATING SUPPLY" explanation="Effective circulating supply = vested tokens minus staked minus burned. This is the actual free-floating supply available for trading.">
         <MCFanChart sims={sims} field="circulatingSupply" label="EFFECTIVE CIRCULATING SUPPLY" formatter={mcFmtB} height={140} color={MC.purple} />
       </MCSection>
 
       {/* ─── 5. Unlock Sell Pressure ───────────────────────────────── */}
-      <MCSection title="5 · VESTING UNLOCK SELL PRESSURE" explanation="When tokens vest, holders can sell. Pre-sale 2 and Advisors fully unlock ~Aug 2026. Team tokens have a 6-month cliff then 42 months linear vesting.">
+      <MCSection title="4 · VESTING UNLOCK SELL PRESSURE" explanation="When tokens vest, holders can sell. Pre-sale 2 and Advisors fully unlock ~Aug 2026. Team tokens have a 6-month cliff then 42 months linear vesting.">
         <div style={{ display: "flex", gap: 4, alignItems: "flex-end", height: 100, marginBottom: 12 }}>
           {unlockData.map((d, i) => {
             const max = Math.max(...unlockData.map((x) => x.unlocks), 1);
@@ -2029,7 +2031,7 @@ function MonteCarloTab({ price: livePrice }) {
       </MCSection>
 
       {/* ─── 6. Liquidity Stress ───────────────────────────────────── */}
-      <MCSection title="6 · LIQUIDITY STRESS TEST" explanation={`With ~${mcFmtUsd(liquidityDepth)} liquidity depth, large sells cause slippage. Estimated price impact for different sell sizes at current depth.`}>
+      <MCSection title="5 · LIQUIDITY STRESS TEST" explanation={`With ~${mcFmtUsd(liquidityDepth)} liquidity depth, large sells cause slippage. Estimated price impact for different sell sizes at current depth.`}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8 }}>
           {liqStress.map((l) => (
             <div key={l.size} style={{ textAlign: "center", background: "#0D1117", borderRadius: 6, padding: "10px 6px" }}>
@@ -2041,13 +2043,13 @@ function MonteCarloTab({ price: livePrice }) {
       </MCSection>
 
       {/* ─── 7. Burn Feedback Loop ─────────────────────────────────── */}
-      <MCSection title="7 · BURN → DEFLATION LOOP" explanation="More network usage → more burns → less supply → value accrual. The mint side creates fewer tokens than burned, approaching 1:1 as supply nears 5B.">
+      <MCSection title="6 · BURN → DEFLATION LOOP" explanation="More network usage → more burns → less supply → value accrual. The mint side creates fewer tokens than burned, approaching 1:1 as supply nears 5B.">
         <MCFanChart sims={sims} field="tokensBurned" label="MONTHLY TOKENS BURNED" formatter={mcFmtB} height={130} color={MC.green} />
         <MCFanChart sims={sims} field="tokensMinted" label="MONTHLY TOKENS MINTED (REWARDS)" formatter={mcFmtB} height={130} color={MC.purple} />
       </MCSection>
 
       {/* ─── 8. Staking vs Float ───────────────────────────────────── */}
-      <MCSection title="8 · STAKING vs FLOAT" explanation="Tokens staked in node contracts are locked and removed from circulation. Staking participation grows with active wallet growth.">
+      <MCSection title="7 · STAKING vs FLOAT" explanation="Tokens staked in node contracts are locked and removed from circulation. Staking participation grows with active wallet growth.">
         <MCFanChart sims={sims} field="stakedTokens" label="STAKED TOKENS" formatter={mcFmtB} height={130} color={MC.green} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 10 }}>
           <MCMetric label="STAKED NOW" value={mcFmtB(mcPercentiles(sims, "stakedTokens", 0).p50)} accent={MC.green} />
@@ -2057,12 +2059,12 @@ function MonteCarloTab({ price: livePrice }) {
       </MCSection>
 
       {/* ─── 9. Reward Pool ────────────────────────────────────────── */}
-      <MCSection title="9 · REWARD POOL HEALTH" explanation="Pays node operators. Replenished by deflationary mints, drained by operator claims. If depleted, Foundation must step in.">
+      <MCSection title="8 · REWARD POOL HEALTH" explanation="Pays node operators. Replenished by deflationary mints, drained by operator claims. If depleted, Foundation must step in.">
         <MCFanChart sims={sims} field="rewardPool" label="REWARD POOL (TOKENS)" formatter={mcFmtB} height={130} color={MC.gold} />
       </MCSection>
 
       {/* ─── 10. Node Break-Even ───────────────────────────────────── */}
-      <MCSection title="10 · NODE OPERATOR BREAK-EVEN" explanation="Can you profitably run a posemesh node? Models monthly USD reward per node vs ~$50/month operating cost.">
+      <MCSection title="9 · NODE OPERATOR BREAK-EVEN" explanation="Can you profitably run a posemesh node? Models monthly USD reward per node vs ~$50/month operating cost.">
         <MCFanChart sims={sims} field="nodeROI" label="MONTHLY NODE ROI (%)" formatter={mcFmtPct} height={120} color={MC.green} showZero />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 10 }}>
           <MCMetric label="NODE COST (EST)" value="$50/mo" accent={MC.muted} />
@@ -2072,7 +2074,7 @@ function MonteCarloTab({ price: livePrice }) {
       </MCSection>
 
       {/* ─── 11. Deflation Timeline ────────────────────────────────── */}
-      <MCSection title="11 · DEFLATION TIMELINE" explanation="Estimated time to reach each supply milestone. Deflation is asymptotic — approaching 5B gets exponentially harder.">
+      <MCSection title="10 · DEFLATION TIMELINE" explanation="Estimated time to reach each supply milestone. Deflation is asymptotic — approaching 5B gets exponentially harder.">
         <div style={{ display: "grid", gridTemplateColumns: `repeat(${deflationTimeline.length}, 1fr)`, gap: 8 }}>
           {deflationTimeline.map((t) => (
             <div key={t.target} style={{ background: "#0D1117", border: `1px solid ${MC.cardBorder}`, borderRadius: 8, padding: "14px 10px", textAlign: "center" }}>
@@ -2086,14 +2088,14 @@ function MonteCarloTab({ price: livePrice }) {
       </MCSection>
 
       {/* ─── 12. Market Cap ────────────────────────────────────────── */}
-      <MCSection title="12 · MARKET CAP PROJECTION" explanation="Market cap = price × circulating supply. FDV = price × total supply.">
+      <MCSection title="11 · MARKET CAP PROJECTION" explanation="Market cap = price × circulating supply. FDV = price × total supply.">
         <MCFanChart sims={sims} field="marketCap" label="MARKET CAP (USD)" formatter={mcFmtUsd} height={140} color={MC.gold} />
         <MCFanChart sims={sims} field="fdv" label="FULLY DILUTED VALUATION (USD)" formatter={mcFmtUsd} height={140} color={MC.purple} />
       </MCSection>
 
       {/* ─── Footer ────────────────────────────────────────────────── */}
       <div style={{ textAlign: "center", padding: "20px 0", color: MC.veryDim, fontSize: 11, ...M, letterSpacing: "0.1em" }}>
-        PRICE SENSITIVITY · {NUM_SIMS} PATHS · {mcFmtMo(months)} · 13 VARIABLES · SCENARIO SIMULATION · NOT FINANCIAL ADVICE
+        PRICE SENSITIVITY · {NUM_SIMS} PATHS · {mcFmtMo(months)} · 12 VARIABLES · SCENARIO SIMULATION · NOT FINANCIAL ADVICE
       </div>
     </div>
   );

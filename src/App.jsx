@@ -1756,6 +1756,14 @@ function MonteCarloTab({ price: livePrice }) {
   const [btcAnnualReturn, setBtcAnnualReturn] = useState(0.15);     // Var 12 (Fix #6)
   const [supplyElasticity, setSupplyElasticity] = useState(0.30);   // Var 13 (Fix #1)
 
+  // ── Ecosystem inputs (Stage 7a) — FUTURE-STATE / ASSUMED. Default 0 = today's
+  // reality (only Auki's own apps use the protocol; no live buyback, no operators).
+  const [monthlyRevenueUsd, setMonthlyRevenueUsd] = useState(0);  // SaaS fiat $/mo
+  const [diversionPct, setDiversionPct] = useState(30);           // POLICY: % of revenue → open-market buyback
+  const [ecoDau, setEcoDau] = useState(0);                        // external daily active users
+  const [ecoNodes, setEcoNodes] = useState(0);                    // decentralized operator nodes
+  const [predictiveStakeUsd, setPredictiveStakeUsd] = useState(0); // app-dev predictive stake locked $
+
   // Run simulation (off main thread via Web Worker)
   const { sims, running: simRunning } = useMCWorker({
     months, startPrice,
@@ -1763,6 +1771,7 @@ function MonteCarloTab({ price: livePrice }) {
     networkEconActivity, unlockSellPressure, openMarketBuybackUsd, networkUsageGrowth,
     activeWalletGrowth, buySellImbalance, btcCorrelation, volatility30d,
     burnEfficiency, btcAnnualReturn, supplyElasticity,
+    monthlyRevenueUsd, diversionPct, ecoDau, ecoNodes, predictiveStakeUsd,
   }, NUM_SIMS);
 
   const summary = useMemo(() => sims ? mcSummary(sims, months, startPrice) : null, [sims, months, startPrice]);
@@ -1775,11 +1784,12 @@ function MonteCarloTab({ price: livePrice }) {
     networkEconActivity, unlockSellPressure, openMarketBuybackUsd, networkUsageGrowth,
     activeWalletGrowth, buySellImbalance, btcCorrelation, volatility30d,
     burnEfficiency, btcAnnualReturn, supplyElasticity,
-    monthlyRevenueUsd: 0, diversionPct: 0, ecoDau: 0, ecoNodes: 0,
+    monthlyRevenueUsd, diversionPct, ecoDau, ecoNodes, predictiveStakeUsd,
   }), [months, startPrice, cexCoverageScore, dexDailyVolume, liquidityDepth,
     networkEconActivity, unlockSellPressure, openMarketBuybackUsd, networkUsageGrowth,
     activeWalletGrowth, buySellImbalance, btcCorrelation, volatility30d,
-    burnEfficiency, btcAnnualReturn, supplyElasticity]);
+    burnEfficiency, btcAnnualReturn, supplyElasticity,
+    monthlyRevenueUsd, diversionPct, ecoDau, ecoNodes, predictiveStakeUsd]);
   const medianSim = useMemo(() => {
     if (!sims || !sims.length) return null;
     const p50price = mcPercentiles(sims, "price", months).p50;
@@ -1932,6 +1942,32 @@ function MonteCarloTab({ price: livePrice }) {
             <MCSlider label="13 · SUPPLY ELASTICITY" value={supplyElasticity} onChange={setSupplyElasticity}
               min={0.05} max={0.50} step={0.05} format={(v) => v.toFixed(2)}
               tip="How much price responds to supply burns. 0.30 = markets price 30% of supply shock immediately (conservative). 0.50 = half priced in. Higher = stronger burn→price feedback." />
+          </div>
+        </div>
+
+        {/* ─── Ecosystem inputs — ASSUMED / FUTURE-STATE (Stage 7a/7c) ──── */}
+        {/* Visually separated from the calibrated inputs above to keep the seam */}
+        {/* visible: these are projections of a network that has not yet scaled. */}
+        <div style={{ marginTop: 22, padding: 16, border: `1px solid ${MC.purple}`, borderRadius: 10, background: "rgba(196,122,181,0.05)" }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
+            <div style={{ fontSize: 11, color: MC.purple, letterSpacing: "0.12em", ...M, fontWeight: 700 }}>ECOSYSTEM · ASSUMED · FUTURE-STATE</div>
+            <div style={{ fontSize: 10.5, color: MC.muted, ...M }}>default 0 = today (only Auki's apps use the protocol)</div>
+          </div>
+          <div style={{ fontSize: 11, color: MC.muted, lineHeight: 1.5, marginBottom: 14, maxWidth: 760 }}>
+            These inputs are <b>not calibrated</b> — they project a network that has not yet scaled. They drive the
+            price through the open-market buyback (revenue × diversion), via the same calibrated liquidity
+            mechanism the sell side uses. At $0 revenue the model reproduces today's reality exactly.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 24 }}>
+            <MCSlider label="MONTHLY REVENUE (SaaS, USD)" value={monthlyRevenueUsd} onChange={setMonthlyRevenueUsd}
+              min={0} max={5000000} step={50000} format={(v) => v === 0 ? "$0 (today)" : mcFmtUsd(v) + "/mo"}
+              tip="Real fiat SaaS revenue from apps on the network (e.g. Cactus for grocery chains). This is the dollars-in figure — whether from 1 client or 1,000 is irrelevant to the token; only the dollar total matters." />
+            <MCSlider label="DIVERSION → BUYBACK (POLICY)" value={diversionPct} onChange={setDiversionPct}
+              min={0} max={100} step={5} format={(v) => `${v}%`}
+              tip="POLICY CHOICE (not a market outcome): the % of revenue routed to buying $AUKI on the OPEN MARKET and burning it. Open-market buys move price; treasury-sourced burns would not. This dial is the single most important policy lever — shown here as policy, set by Auki, not derived." />
+            <MCSlider label="OPEN-MARKET BUYBACK $/MO" value={Math.round(monthlyRevenueUsd * diversionPct / 100)} onChange={() => {}}
+              min={0} max={5000000} step={1} format={(v) => mcFmtUsd(v) + "/mo"}
+              tip="Computed = revenue × diversion%. This is the actual monthly open-market buy pressure the engine applies (read-only; set the two sliders to the left)." />
           </div>
         </div>
       </div>

@@ -329,6 +329,10 @@ function SupplyAllocationPie({ totalsByGroup }) {
 
 // ─── MEXC Components ──────────────────────────────────────────────────────────
 function MexcSection({ ticker, loading, error, onRefresh, ts }) {
+  // MEXC v3 priceChangePercent is treated as a FRACTION (0.0345 = 3.45%) and scaled x100
+  // for display. All three call sites in this file share that convention. TODO(dev):
+  // confirm once against a live /api/v3/ticker/24hr response; if the API in fact returns
+  // whole percent ("5.000" = 5%), remove the x100 at all three sites together.
   const pctChange = ticker?.priceChangePercent != null ? parseFloat(ticker.priceChangePercent) * 100 : null;
   const pctColor = pctChange > 0 ? "#7CC4A4" : pctChange < 0 ? "#E07B5A" : "#555";
 
@@ -1408,7 +1412,7 @@ function MCDiagnostics({ sims, months, startPrice }) {
         <MCCIBar pct={up.pct} ciLow={up.ciLow} ciHigh={up.ciHigh} />
         <div style={{ display: "flex", gap: 22, marginTop: 10, flexWrap: "wrap" }}>
           <span style={{ fontSize: 11, color: MC.muted, ...M }}>≥2x: <strong style={{ color: MC.green }}>{x2.pct.toFixed(1)}%</strong> <span style={{ color: MC.dim }}>±{(1.96 * x2.sePts).toFixed(1)}pts</span></span>
-          <span style={{ fontSize: 11, color: MC.muted, ...M }}>≥50% drawdown: <strong style={{ color: MC.red }}>{half.pct.toFixed(1)}%</strong> <span style={{ color: MC.dim }}>±{(1.96 * half.sePts).toFixed(1)}pts</span></span>
+          <span style={{ fontSize: 11, color: MC.muted, ...M }}>≥50% drawdown: <strong style={{ color: MC.red }}>{(100 - half.pct).toFixed(1)}%</strong> <span style={{ color: MC.dim }}>±{(1.96 * half.sePts).toFixed(1)}pts</span></span>
           <span style={{ fontSize: 11, color: MC.muted, ...M }}>horizon in stress regime: <strong style={{ color: MC.gold }}>{stressPct.toFixed(0)}%</strong> <span style={{ color: MC.dim }}>({horizonStressMonths}mo)</span></span>
         </div>
       </div>
@@ -1772,7 +1776,7 @@ function MonteCarloTab({ price: livePrice }) {
   const [ecoNodes, setEcoNodes] = useState(0);                    // decentralized operator nodes
   const [predictiveStakeUsd, setPredictiveStakeUsd] = useState(0); // app-dev predictive stake locked $
 
-  // Run simulation (off main thread via Web Worker)
+  // Run simulation (deferred main-thread compute; see useMCWorker header note)
   const { sims, running: simRunning } = useMCWorker({
     months, startPrice,
     cexCoverageScore, dexDailyVolume, liquidityDepth,
@@ -1975,7 +1979,7 @@ function MonteCarloTab({ price: livePrice }) {
               tip="Computed = revenue × diversion%. This is the actual monthly open-market buy pressure the engine applies (read-only; set the two sliders to the left)." />
             <MCSlider label="DECENTRALIZED NODES" value={ecoNodes} onChange={setEcoNodes}
               min={0} max={100000} step={500} format={(v) => v === 0 ? "0 (today, AWS-run)" : mcFmtB(v)}
-              tip="Independent Hagall operator nodes. Each stakes $200 of AUKI (paper), locking float (scarcity); operators sell rewards to cover ~$0.86/day cost (sell pressure). Both effects are educated stabs grounded in the token paper, not calibrated. Today ~0 (Auki runs centralized AWS nodes)." />
+              tip="Independent Hagall operator nodes. Each stakes $200 of AUKI (paper), locking tokens out of float. In this build nodes act through that stake lock ONLY: operator reward-selling is staged for a later release (mint is not yet wired), so no offsetting sell pressure is simulated. Grounded in the token paper, not calibrated. Today ~0 (Auki runs centralized AWS nodes)." />
             <MCSlider label="PREDICTIVE STAKE LOCKED ($)" value={predictiveStakeUsd} onChange={setPredictiveStakeUsd}
               min={0} max={10000000} step={100000} format={(v) => v === 0 ? "$0 (today)" : mcFmtUsd(v)}
               tip="AUKI locked by app developers via predictive staking for credit-burn discounts (paper §8). Locks float out of circulation, lifting the scarcity premium through the same mechanism as protocol staking. Today ~0." />

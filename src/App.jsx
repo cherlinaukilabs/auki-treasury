@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
+const AUKI_LOGO = "data:image/png;base64,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"; // boxed rune mark, white on transparent, embedded (no external dependency)
 const QUERY_BALANCES = 6752291;
 const QUERY_MOVEMENTS = 6752302;
 const QUERY_TRADES = 6752309;
@@ -1963,9 +1964,9 @@ function MonteCarloTab({ price: livePrice }) {
             calibrated liquidity mechanism. At 0 the model reproduces today's reality exactly.
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 24 }}>
-            <MCSlider label="APPLICATION REVENUE (USD)" value={monthlyRevenueUsd} onChange={setMonthlyRevenueUsd}
+            <MCSlider label="APPLICATION REVENUE (PROJECTION)" value={monthlyRevenueUsd} onChange={setMonthlyRevenueUsd}
               min={0} max={5000000} step={50000} format={(v) => v === 0 ? "$0 (today)" : mcFmtUsd(v) + "/mo"}
-              tip="Monthly fiat revenue from applications running on the network. This is the dollars-in figure — whether from one large client or many small ones is irrelevant to the token; only the dollar total matters." />
+              tip="External revenue today is $0. Any value above zero is YOUR assumption — the model shows what that revenue would do, not whether it will happen. This is the model's most powerful upward lever and it works regardless of network adoption, so own the number you choose. (One large client or many small ones is irrelevant; only the dollar total matters.)" />
             <MCSlider label="DIVERSION → BUYBACK (POLICY)" value={diversionPct} onChange={setDiversionPct}
               min={0} max={100} step={5} format={(v) => `${v}%`}
               tip="POLICY CHOICE (not a market outcome): the % of revenue routed to buying $AUKI on the OPEN MARKET and burning it. Open-market buys move price; treasury-sourced burns would not. This dial is the single most important policy lever — shown here as policy, set by Auki, not derived." />
@@ -2147,9 +2148,7 @@ function LoginScreen({ onAuth }) {
     <div style={{ minHeight: "100vh", background: "#080808", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'JetBrains Mono',monospace" }}>
       <div style={{ width: 320, padding: "40px 36px", background: "#111", border: "1px solid #2A3440", borderRadius: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 32 }}>
-          <div style={{ width: 28, height: 28, borderRadius: 6, background: "#C8A96E", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ color: "#0D0D0D", fontSize: 19, fontWeight: 900 }}>A</span>
-          </div>
+          <img src={AUKI_LOGO} alt="Auki" style={{ height: 28, width: "auto", display: "block" }} />
           <span style={{ fontSize: 19, fontWeight: 700, letterSpacing: "0.1em", color: "#CCC" }}>AUKI TREASURY</span>
         </div>
         <div style={{ fontSize: 12, color: "#444", letterSpacing: "0.12em", marginBottom: 10 }}>ACCESS CODE</div>
@@ -2376,9 +2375,7 @@ export default function AukiTreasury() {
       <div style={{ borderBottom: "1px solid #161616", padding: "13px 32px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, background: "#080808", zIndex: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ width: 22, height: 22, borderRadius: 5, background: "#C8A96E", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <span style={{ color: "#0D0D0D", fontSize: 14, fontWeight: 900 }}>A</span>
-            </div>
+            <img src={AUKI_LOGO} alt="Auki" style={{ height: 22, width: "auto", display: "block" }} />
             <span style={{ fontSize: 19, fontWeight: 700, letterSpacing: "0.1em", color: "#CCC" }}>AUKI TREASURY</span>
           </div>
           <span style={{ color: "#222" }}>|</span>
